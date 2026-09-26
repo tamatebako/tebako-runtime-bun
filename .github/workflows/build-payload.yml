@@ -8,6 +8,13 @@ name: build-payload
 on:
   workflow_dispatch:
 
+# One run per branch at a time: a repeated dispatch cancels the stale
+# run (the sibling feedstocks carry the same block on their push/PR
+# triggers).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
