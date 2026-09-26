@@ -1,0 +1,46 @@
+name: build-payload
+
+# Factory scaffold: the leg matrix below is the SSOT the release tools
+# (tools/audit_release.rb, tools/registry_update.rb via
+# tools/lib/feedstock.rb) read the (flavor × platform) shape from.
+# Manual dispatch only until tools/build + the publish legs land; the
+# build job is a loud placeholder, not a factory run.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [official]
+        platform:
+          - {triplet: aarch64-macos,       asset_platform: macos-arm64,       exe_suffix: "",     runs_on: macos-14}
+          - {triplet: x86_64-macos,        asset_platform: macos-x86_64,      exe_suffix: "",     runs_on: macos-15-intel}
+          - {triplet: x86_64-linux-gnu,    asset_platform: linux-gnu-x86_64,  exe_suffix: "",     runs_on: ubuntu-24.04}
+          - {triplet: aarch64-linux-gnu,   asset_platform: linux-gnu-arm64,   exe_suffix: "",     runs_on: ubuntu-24.04-arm}
+          - {triplet: x86_64-windows-ucrt, asset_platform: windows-ucrt64,    exe_suffix: ".exe", runs_on: windows-latest}
+    runs-on: ${{ matrix.platform.runs_on }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: windows sign gate
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          WINDOWS_SIGNING_ENABLED: ${{ vars.WINDOWS_SIGNING_ENABLED }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_ENDPOINT: ${{ vars.AZURE_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT_NAME: ${{ vars.AZURE_SIGNING_ACCOUNT_NAME }}
+          AZURE_SIGNING_CERT_PROFILE: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+        run: tools/windows-sign-gate.sh
+
+      - name: scaffold notice
+        shell: bash
+        run: |
+          echo "::notice::factory scaffold — flavor=${{ matrix.flavor }} triplet=${{ matrix.platform.triplet }}: tools/build + the publish legs land with the factory implementation PRs. This run builds nothing."

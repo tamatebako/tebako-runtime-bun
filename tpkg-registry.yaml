@@ -1,0 +1,17 @@
+# =============================================================================
+# tpkg-registry.yaml — the tebako-runtime-bun runtime registry (spec 04 §2)
+#
+# OWNED BY tools/registry_update.rb — rendered from a release's per-package
+# .manifest.json shards by the build-payload workflow's release job and
+# landed on main by bot PR (spec 13 §2a). NEVER hand-edit: the one sanctioned
+# manual mark is `status: withdrawn` on a version entry (spec 04 §2 — release
+# assets are immutable, so withdrawal is the only remedy for a bad published
+# artifact), and the renderer preserves those marks across renders.
+#
+# kind: runtime entries carry NO entrypoints key (the registry validator:
+# only apps and toolkits declare entrypoints) and ALWAYS carry `engine`
+# (spec 04 §2 MINOR 1 — the edge-discovery key; an engine-less runtime
+# entry is invisible to `kind: runtime` edges).
+# =============================================================================
+schema_version: 1
+payloads: []
