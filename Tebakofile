@@ -26,8 +26,11 @@ flavors:
       # platform (repack: no compilation). platform is the spec 03
       # triplet; the zips nest under one dir (strip_components: 1).
       # Digests verified against the release's SHASUMS256.txt 2026-09-26.
-      # linux-musl is EXCLUDED: no upstream build exists (glibc only) —
-      # declared in the platform list, never discovered at run time.
+      # linux-musl is DEFERRED to the factory implementation PR: upstream
+      # ships musl builds (bun-linux-x64-musl-baseline.zip,
+      # bun-linux-aarch64-musl.zip — digests in the release's
+      # SHASUMS256.txt), so the legs land as declared recipe rows, never
+      # discovered at run time.
       # Upstream signs the macOS/windows binaries (Oven); staging
       # verifies and records the verdict in the manifest's provenance.
       version: "1.4.2"
