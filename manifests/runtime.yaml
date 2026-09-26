@@ -1,0 +1,48 @@
+schema_version: 1
+# Runtime manifest template for bun (spec 03 §2.2, kind: runtime;
+# filled from Tebakofile's upstream/runtime blocks by tools/build).
+identity:
+  schema_version: 1
+  kind: runtime
+  name: "bun"
+  version: "@@VERSION@@"
+  producer: {tool: feedstock-build, tool_version: "1"}
+  created: "@@CREATED@@"
+  source: {src_sha256: "@@UPSTREAM_SHA256@@", commit: "@@UPSTREAM_COMMIT@@", builder: "local"}
+  digest:
+    tree_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"  # placeholder until the CAS lands (spec 03)
+    blob_sha256: "@@BLOB_SHA256@@"   # zeroed inside the image (spec 03 §7)
+  signing: {state: unsigned}
+  encryption: {state: none}
+  # The payload root IS bun's home (one self-contained binary plus the
+  # bunx alias). The runtime-neutral `home` annotation (spec 22 §6) is
+  # the exec-cache whole-tree materialization signal (crates/tfs
+  # mount_is_home reads identity.annotations.home): when visibility
+  # resolves to exec-cache — the windows arm of the locked default
+  # order — the mounted env image materializes into TEBAKO_EXEC_CACHE
+  # and bun runs from host-real files. Under the POSIX preload arm the
+  # key is unread cost only.
+  annotations: {home: "/"}
+provides:
+  provides:
+    engine: "@@ENGINE@@"
+    version: "@@VERSION@@"
+    abi_line: "@@ABI_LINE@@"
+    platform: "@@TRIPLET@@"
+    # spec 28 §8's flavor axis — EngineProvides.implementation (tpkg
+    # since spec 30 §1; additive, absent = eligible). L1 is authoritative;
+    # the release-index shard mirrors the same value for the store's
+    # entry_meta. SSOT: Tebakofile's flavors.<flavor>.implementation.
+    implementation: "@@IMPLEMENTATION@@"
+  built_from:
+    src_sha256: "@@UPSTREAM_SHA256@@"
+    patch_set: "none"   # a repack applies no patches; the field is required non-empty
+  # The spawn surface (spec 30 §2): the commands this runtime boots as a
+  # separate process for a consumer payload's `runtime` edge expose list.
+  # bun's surface is the binary plus the bunx alias (the recipe's flavor
+  # entrypoints, the feedstock SSOT). A runtime runs on itself, so no
+  # runtime_requirement.
+  entrypoints:
+@@ENTRYPOINTS_YAML@@
+  env: {}
+  capabilities: {exec: true, read: true, runtime: true}

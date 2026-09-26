@@ -1,0 +1,37 @@
+# Env-image layout declaration for the bun runtime (spec 18 §2.2 —
+# the C3 contract between the runtime exe and its env image). Grammar
+# owner: docs/spec/schemas/layout.yaml in tamatebako/tebako
+# (schema_minor 4); the writer here FLOWS the same owned values.
+# Rendered by tools/build into /lib/tebako/layout.yaml inside the image.
+schema_version: 1
+era: 2
+image_layout: 1
+# The mount root the image was built for — must equal the wrapper exe's
+# compiled-in WRAPPER_RUNTIME_ROOT (/__tfs__ POSIX, A:/t on windows;
+# crates/tebako-driver/src/wrapper.rs). A mismatch is exit 78, never a
+# broken boot.
+mount_root: "@@MOUNT_ROOT@@"
+interpreter_api_version: "@@API_VERSION@@"
+# spec 29's wrapper pattern: the exe artifact is the tebako-owned
+# wrapper (the bun bytes the driver cannot be linked into); the real
+# interpreter is declared here, POSIX-absolute on every platform. The
+# POSIX dist tree stages bin/bun; the windows zip stages bun.exe at
+# the payload root — tools/build renders the per-triplet path from the
+# recipe's interpreter/interpreter_windows pair.
+interpreter: "@@INTERPRETER@@"
+# visibility key ABSENT — spec 29 §3's locked default order applies:
+# preload on POSIX, exec-cache on windows (the only mechanism there),
+# journaled at boot (event=visibility mechanism=…). A declared mechanism
+# would be validated at press; the default order is the honest one for
+# this runtime.
+# POSIX legs only: the link-unit preload shim rides the image so the
+# preload tier's interposition has its libtfs-preload at hand (the
+# driver arms DYLD_INSERT_LIBRARIES / LD_PRELOAD from this grant, spec
+# 22 §3 rules E2/E3; declared-but-absent is exit 78 — tools/build stages
+# the file in the same pass). The windows image omits the key: no
+# preload mechanism there, exec-cache is the default.
+@@PRELOAD_SHIM_DECL@@
+# mount_root_override omitted ⇒ false (the closed default): bun is one
+# self-contained binary with no home tree to relocate, so the image
+# grants no override — a granted no-op knob would violate spec 00 §9
+# (no decorative surface).
