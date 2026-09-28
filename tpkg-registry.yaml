@@ -11,7 +11,36 @@
 # kind: runtime entries carry NO entrypoints key (the registry validator:
 # only apps and toolkits declare entrypoints) and ALWAYS carry `engine`
 # (spec 04 §2 MINOR 1 — the edge-discovery key; an engine-less runtime
-# entry is invisible to `kind: runtime` edges).
+# entry is invisible to `kind: runtime` edges) AND `implementation`
+# (spec 28 §8 — the flavor axis; an implementation-named edge sees only
+# entries carrying its key). Versions are the composite `<bun>-<tebako>`
+# keys (one bun ships on several tebako lines; every line stays
+# addressable).
 # =============================================================================
 schema_version: 1
-payloads: []
+payloads:
+- name: bun
+  kind: runtime
+  versions:
+  - version: 1.4.2-2.8.22
+    platforms:
+      aarch64-linux-gnu:
+        artifact: tebako-runtime-2.8.22-1.4.2-linux-gnu-arm64.tfs
+        sha256: 40f1c68b496f48bd8db9168464bca6a9b34f6940a610890369292a72e0837920
+      aarch64-macos:
+        artifact: tebako-runtime-2.8.22-1.4.2-macos-arm64.tfs
+        sha256: b8dcd15ae7cc9f5c0b42af665d00037364f9d47e0b0eea78a846f1d7a52efda9
+      x86_64-linux-gnu:
+        artifact: tebako-runtime-2.8.22-1.4.2-linux-gnu-x86_64.tfs
+        sha256: fb48f664b0f59990a94673a3154ee7fda65849a7fd87c4c4a287f5490d873b63
+      x86_64-macos:
+        artifact: tebako-runtime-2.8.22-1.4.2-macos-x86_64.tfs
+        sha256: 4f1cd2a85613b5504022671368ae91a8facc2aec5fe6c25312f181d82674a1cf
+      x86_64-windows-ucrt:
+        artifact: tebako-runtime-2.8.22-1.4.2-windows-ucrt64.tfs
+        sha256: 2ab15779b27cebdf2d1ea6a6129cab1258ff0a57ffca72c039e03cc0c23628ec
+    release:
+      ref: tfs:github:tamatebako/tebako-runtime-bun:v2.8.22
+  engine: bun
+  implementation: bun
+  default: 1.4.2-2.8.22
