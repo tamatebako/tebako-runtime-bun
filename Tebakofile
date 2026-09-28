@@ -26,11 +26,11 @@ flavors:
       # platform (repack: no compilation). platform is the spec 03
       # triplet; the zips nest under one dir (strip_components: 1).
       # Digests verified against the release's SHASUMS256.txt 2026-09-26.
-      # linux-musl is DEFERRED to the factory implementation PR: upstream
-      # ships musl builds (bun-linux-x64-musl-baseline.zip,
-      # bun-linux-aarch64-musl.zip — digests in the release's
-      # SHASUMS256.txt), so the legs land as declared recipe rows, never
-      # discovered at run time.
+      # linux-musl is DEFERRED (issue #2): upstream ships musl builds
+      # (bun-linux-x64-musl-baseline.zip, bun-linux-aarch64-musl.zip —
+      # digests in the release's SHASUMS256.txt) and the tebako product
+      # ships the full musl toolchain at v2.8.22, so the legs land as
+      # declared recipe rows, never discovered at run time.
       # Upstream signs the macOS/windows binaries (Oven); staging
       # verifies and records the verdict in the manifest's provenance.
       version: "1.4.2"
@@ -81,26 +81,27 @@ runtime:
   mount_root_override: false       # closed default — bun is one self-contained binary with no home tree to relocate; granting a no-op knob violates spec 00 §9
   # The tebako product line the pair builds against: the wrapper exe
   # (tebako-runtime-launcher) and the preload shim (link-unit). The line
-  # number names the artifacts (tebako-runtime-2.8.17-1.4.2-*) and the
-  # release tag (v2.8.17 — the trr convention: the tag IS the tebako
+  # number names the artifacts (tebako-runtime-2.8.22-1.4.2-*) and the
+  # release tag (v2.8.22 — the trr convention: the tag IS the tebako
   # line).
   #
-  # v2.8.17 (2026-09-25) is the current product line and the first pin of
+  # v2.8.22 (2026-09-28) is the current product line and the first pin of
   # this factory: it carries every contract the pair speaks — spec 29's
   # wrapper pattern, spec 32's executable requires edges, spec 33's
-  # on_runtime composition, and the mount-ancestor routes the flavors
-  # mechanism mounts through.
-  wrapper_tebako: "2.8.17"
+  # on_runtime composition, the mount-ancestor routes the flavors
+  # mechanism mounts through, and the full linux-musl toolchain (the
+  # deferred musl legs' pins — issue #2).
+  wrapper_tebako: "2.8.22"
   # The wrapper's trust anchor, per tool-platform (the launcher is the
   # shipped runtime pair's process entry point — an unauthenticated
-  # download would be a supply-chain hole). Digests are the v2.8.17
-  # release's monolith SHA256SUMS entries, fetched 2026-09-26.
+  # download would be a supply-chain hole). Digests are the v2.8.22
+  # release's monolith SHA256SUMS entries, fetched 2026-09-29.
   wrapper_sha256:
-    macos-arm64: "380973d2da5c11f4d21e1ce2fb2657c26bd6a9e6dc2fa32ce05e38bb7903b99a"
-    macos-x86_64: "5729c7a46589a012413426c864552046786d7b945a4f97dbdf390845c68a8172"
-    linux-gnu-x86_64: "a75b85aa5648f4edb39b88657f365a8ba474bf6d29837f9e8382a29f5011b3bc"
-    linux-gnu-arm64: "b6406400196154231148f9ee91841372cb1209425c6fe604c53f0f8e43ec78b7"
-    windows-ucrt64: "9674f291e0925bb081c3ed5b188746591af766883bd1f262ba6d74760d75970b"
+    macos-arm64: "6491565e8e75a8e2776a75d4f03875db8a978e94b1d244c43649b773015552c6"
+    macos-x86_64: "d9e901cdba292344870c1834c0fe737a14125acc45273721b19cde03b0f772af"
+    linux-gnu-x86_64: "5882c74710db287ac6e73c0d5c09afdfd696555da4ede5aad1c6b6e0b6235013"
+    linux-gnu-arm64: "e27befc2dcc5f00390b6bdf67bd4cfda0adbca53fbc363902e4423a0b852c91f"
+    windows-ucrt64: "afe65d91b046d829fbc9b7e9ae4de8cbc76290021274cb899b25dc2e6339bda3"
 
 # Factory tools used by tools/build (the imager + the preload shim): the
 # tfs CLI and the link-unit tarball from the tamatebako/tebako release.
@@ -109,10 +110,10 @@ runtime:
 # tools/pins.rb reads this block into $GITHUB_ENV). The tfs pins are
 # cross-checked against the release's SHA256SUMS at fetch time; the
 # link-unit tarballs are NOT in that monolith, so these pins are their
-# single trust anchor (verified against the v2.8.17 downloads 2026-09-26).
+# single trust anchor (verified against the v2.8.22 downloads 2026-09-29).
 tools:
   repo: "tamatebako/tebako"
-  release: "v2.8.17"
+  release: "v2.8.22"
   # The release machinery pin: the tamatebako/tebako-release-tooling tag
   # the Gemfile resolves (the sign step's tebako-release exe). The gem is
   # the signer's single owner (ecosystem invariant 10) — this feedstock
@@ -120,16 +121,16 @@ tools:
   release_tooling: "v0.2.1"
   sha256:
     tfs:
-      macos-arm64: "f2c957bd27a3b2fea871e04bdf5c8de3689a8327a1474ca698e3936eaf239661"
-      macos-x86_64: "cda457657c1eec648091b23df0c2b3119b1af9cfc1dbd95297772ee546f7ec53"
-      linux-gnu-x86_64: "083e4886f751901493d124cf90f8dc20a88fb9ba0877db9af1a5b42d0c1d64db"
-      linux-gnu-arm64: "7ced6afe31e540d63057b5eb3d62de2a1e2879a4ebec859c50d78c4356f95c86"
-      windows-ucrt64: "5ba7d570621ca39de15e680d1206c21d4b9ac571aef2a639ad94a68c2683f7c7"
+      macos-arm64: "08f201f20e808dc0d4253e1617a3dc549a1a316132fdce9d81457645049d2eda"
+      macos-x86_64: "78ada85085d54eb9094d58e2ca468a768433bd7a45dddebfe60345ccf859b9a4"
+      linux-gnu-x86_64: "69c1db503c17a5a6f8dfba907e2dc0d4dc214e2d9761d865c4151d38e0a91527"
+      linux-gnu-arm64: "917c117e4bd61d5b3c1c9d7f1c47919958c7d0f23171dc7b63036f2a4a16865d"
+      windows-ucrt64: "6207b465156bc25c090320e0f8761d47dbafc4fe2b61e8141aaae826f311a816"
     link-unit:                       # POSIX legs only; the windows image omits preload_shim
-      macos-arm64: "7b8def659d77e57d0f32674b243a31e17af9f2afa2b5b5bea5878a3754c1d379"
-      macos-x86_64: "83472bf465b9a7c3769477555d7a385ccea3b574f2d96adc4acaf39db7e99325"
-      linux-gnu-x86_64: "5703dfe538b8936dcea5cb150410ebe6cea5a410092da4951334d14d0c5d269b"
-      linux-gnu-arm64: "df60eaa75d9dc63cb4ac87e95e2ed6963153167d3db2d51bb3259d96565d6f10"
+      macos-arm64: "c11705ad8201acd021e9286f12a261223f537c8cfa055b634f6b0af9fe73decd"
+      macos-x86_64: "674f8e39c4ac3e4997257147db960d197f79ba842e52712b7969e39d0d55d398"
+      linux-gnu-x86_64: "b0b4f7cdd62e5bee26ef8d78b245ed5288e2ccd381f14aebee2016ee2b7892e0"
+      linux-gnu-arm64: "9ab5bb77d314d56c51d721488c178f2d79e39fd6808df8ec5ab3aa786f2a6bf1"
 
 image:
   format: limnifs
