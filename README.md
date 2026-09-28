@@ -14,9 +14,10 @@ directly, with no press-compile step.
 - **upstream:** Bun 1.4.2 (oven-sh/bun), repacked — no compilation. The
   x64 legs ship the **baseline** builds (no AVX requirement) for
   universal reach. There is no linux-musl leg YET: upstream ships musl
-  builds (`bun-linux-x64-musl-baseline`, `bun-linux-aarch64-musl`), and
-  the scaffold defers the two legs to the factory implementation PR —
-  the platform list will declare them, never discover them at run time.
+  builds (`bun-linux-x64-musl-baseline`, `bun-linux-aarch64-musl`) and
+  the tebako product ships the full musl toolchain at v2.8.22 — the two
+  legs are tracked in issue #2 and will land as declared recipe rows,
+  never discovered at run time.
   Bun rolls weekly on 1.x — this factory pins exact versions, never
   `latest`.
 - **artifacts:** `tebako-runtime-<tebako-line>-1.4.2-<platform>[.exe]`

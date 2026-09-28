@@ -1,41 +1,255 @@
 name: build-payload
-
-# Factory scaffold: the leg matrix below is the SSOT the release tools
-# (tools/audit_release.rb, tools/registry_update.rb via
-# tools/lib/feedstock.rb) read the (flavor × platform) shape from.
-# Manual dispatch only until tools/build + the publish legs land; the
-# build job is a loud placeholder, not a factory run.
+# bun feedstock: fetch → stage → image → smoke → (on tags) publish +
+# sign IN-LEG. One mechanical leg per (flavor × version × platform) —
+# flavors are the spec 28 §8 implementation axis (official is bun's only
+# implementation today), platforms aarch64-macos + x86_64-macos +
+# x86_64-linux-gnu + aarch64-linux-gnu + x86_64-windows-ucrt.
+#
+# kind: runtime (spec 28/29): each leg ships the PAIR — the wrapper exe
+# (tebako-runtime-launcher) + the env image (.tfs) + sidecars + the
+# release shard. Spec 13 §2a's de-rendezvous: on tags the
+# leg that built a pair PUBLISHES its write-once names (exe + .tfs +
+# .sha256 sidecars + <stem>.manifest.json shard — names this leg owns
+# alone) and SIGNS every served name in-leg (spec 09 §5's no-fold rule),
+# so N legs publish concurrently with zero rendezvous. The monolithic
+# manifest.json / SHA256SUMS.txt are NEVER release assets — each shard
+# IS its own release-index entry (the resolver's primary form), and the
+# monoliths are derivable consumer-side from the shards + the asset
+# listing. The ONE release
+# job keeps only the duties that need the whole matrix: the read-only
+# AUDIT (tools/audit_release.rb) and the registry render
+# (tools/registry_update.rb) landed by bot PR. `tebako publish` is NOT
+# used: the CLI refuses kind: runtime (runtimes publish through the
+# runtime release flow).
+#
+# TRUST PLANE (both passes gate-off byte-identical — spec 00 invariant
+# 7): the windows legs Authenticode-sign the fetched wrapper exe IN-LEG
+# before tools/build pairs+hashes it (spec 34 §8.2 — sign-then-hash by
+# construction, never a re-hash), and on signing-enabled lines each leg
+# OpenPGP-signs its own served names right after publishing them
+# (spec 09 §5, the tebako-release gem's signer — Tebakofile's
+# tools.release_tooling pins it).
+#
+# PIN DISCIPLINE (the owner's rule): this workflow carries NO version or
+# digest literals. Tebakofile is the SSOT — the `tools:` block pins the
+# tfs CLI + the link-unit tarball (release + per-platform sha256), the
+# `runtime:` block pins the wrapper's product line; tools/pins.rb reads
+# them into $GITHUB_ENV and the fetch steps cross-check the pins against
+# the release's own SHA256SUMS where the monolith covers the asset (the
+# link-unit tarballs are NOT in it — the recipe pin is their anchor).
+#
+# The wrapper exe (tebako-runtime-launcher) ships since tebako v2.1.0
+# (2026-09-01, tamatebako/tebako#498 — spec 30); the
+# runtime.wrapper_tebako pin names that line.
 on:
+  push:
+    branches: [main]
+    tags: ["*"]
+  pull_request:
   workflow_dispatch:
 
-# One run per branch at a time: a repeated dispatch cancels the stale
-# run (the sibling feedstocks carry the same block on their push/PR
-# triggers).
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
+  # tamatebako/tebako#686: the release job lands the registry by bot PR
+  # whose ONLY content is tpkg-registry.yaml. That PR must still turn
+  # green (a protected main pins the `all legs green` check), but there
+  # is nothing to BUILD in it — so the legs skip and the terminal gate
+  # accepts the skip. The detection runs on every event (false for
+  # non-PRs) so the build job can need: it unconditionally.
+  changes:
+    name: registry-only change detection
+    runs-on: ubuntu-latest
+    outputs:
+      registry_only: ${{ steps.diff.outputs.registry_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "registry_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch origin "${{ github.base_ref }}"
+          files="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"
+          echo "changed files: ${files:-<none>}"
+          if [ "$files" = "tpkg-registry.yaml" ]; then
+            echo "registry_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "registry_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    name: ${{ matrix.flavor }} / ${{ matrix.platform.triplet }}
+    needs: changes
+    if: needs.changes.outputs.registry_only != 'true'
+    runs-on: ${{ matrix.platform.os }}
+    # Spec 34 §3/§8.2 (the mirror of tebako-runtime-ruby#155's
+    # _build-platform.yml): a job-level permissions block REPLACES the
+    # workflow-level grant, so it is restated here — plus id-token:write,
+    # the OIDC boundary: the Entra federated credential issues Azure
+    # tokens only to a job of this repo running in the windows-signing
+    # environment. The signing steps below are gated on
+    # WINDOWS_SIGNING_ENABLED: unsigned runs carry the environment but
+    # never request a token.
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    # Spec 34's attestation boundary (see the id-token note above). The
+    # build job is shared by every platform's legs — only the windows
+    # legs ever arm the signing chain, but ALL legs carry the
+    # environment: it must NEVER gain required reviewers (that would gate
+    # every platform's build on an approval); protection rules stay
+    # empty.
+    environment: windows-signing
     strategy:
       fail-fast: false
       matrix:
+        # Identity only (which leg, which runner, which archiver, which
+        # flavor). All versions/digests flow from Tebakofile via
+        # tools/pins.rb. flavor is the spec 28 §8 implementation axis —
+        # official is bun's only flavor today (a `modern` x64 variant is
+        # a possible later row on this same axis).
         flavor: [official]
         platform:
-          - {triplet: aarch64-macos,       asset_platform: macos-arm64,       exe_suffix: "",     runs_on: macos-14}
-          - {triplet: x86_64-macos,        asset_platform: macos-x86_64,      exe_suffix: "",     runs_on: macos-15-intel}
-          - {triplet: x86_64-linux-gnu,    asset_platform: linux-gnu-x86_64,  exe_suffix: "",     runs_on: ubuntu-24.04}
-          - {triplet: aarch64-linux-gnu,   asset_platform: linux-gnu-arm64,   exe_suffix: "",     runs_on: ubuntu-24.04-arm}
-          - {triplet: x86_64-windows-ucrt, asset_platform: windows-ucrt64,    exe_suffix: ".exe", runs_on: windows-latest}
-    runs-on: ${{ matrix.platform.runs_on }}
+          - triplet: aarch64-macos
+            asset_platform: macos-arm64
+            os: macos-14
+            exe_suffix: ""
+            tar: tar
+          - triplet: x86_64-macos
+            asset_platform: macos-x86_64
+            os: macos-15-intel
+            exe_suffix: ""
+            tar: tar
+          - triplet: x86_64-linux-gnu
+            asset_platform: linux-gnu-x86_64
+            os: ubuntu-24.04
+            exe_suffix: ""
+            # bsdtar (libarchive) reads the upstream zips; GNU tar cannot.
+            tar: bsdtar
+          - triplet: aarch64-linux-gnu
+            asset_platform: linux-gnu-arm64
+            os: ubuntu-24.04-arm
+            exe_suffix: ""
+            tar: bsdtar
+          - triplet: x86_64-windows-ucrt
+            asset_platform: windows-ucrt64
+            os: windows-latest
+            exe_suffix: .exe
+            # bsdtar (ucrt64 libarchive) reads the windows zip; GNU tar cannot.
+            tar: /d/a/_temp/msys64/ucrt64/bin/bsdtar.exe
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: windows sign gate
-        if: runner.os == 'Windows'
+      # bsdtar is a linux-leg need: the recipe's sources are zips and GNU
+      # tar cannot read them (macOS's system tar IS bsdtar; the windows
+      # leg installs the ucrt64 one below).
+      - name: Install bsdtar (the zip-capable tar)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+
+      # bsdtar is the only msys2 need: the recipe's windows source is a
+      # zip and GNU tar cannot read it (the macOS leg uses system tar).
+      # gcc-libs rides along for any ucrt64 toolchain binary that still
+      # wants the gcc-runtime DLLs; the pinned tebako binaries themselves
+      # are statically linked (the release's ship gate audits PE imports).
+      - name: Set up MSys2 (ucrt64 bsdtar + gcc runtime)
+        if: matrix.platform.triplet == 'x86_64-windows-ucrt'
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: ucrt64
+          path-type: minimal
+          install: mingw-w64-ucrt-x86_64-libarchive mingw-w64-ucrt-x86_64-gcc-libs
+
+      # Tebakofile's tools block is the toolchain pin SSOT; pins.rb emits
+      # TEBAKO_RELEASE, PKG_NAME/PKG_VERSION, the per-platform
+      # TFS_ASSET/TFS_SHA256 + LINK_UNIT_ASSET/LINK_UNIT_SHA256 for THIS
+      # leg's asset_platform, the wrapper pin (WRAPPER_RELEASE/
+      # WRAPPER_ASSET), the RUNTIME_STEM naming base, and PRELOAD_SHIM on
+      # POSIX. (windows: the runner's hosted Ruby serves Git-bash steps.)
+      - name: Read the toolchain pins (Tebakofile is the SSOT)
+        shell: bash
+        run: ruby tools/pins.rb "${{ matrix.platform.asset_platform }}" "${{ matrix.flavor }}" --env >> "$GITHUB_ENV"
+
+      # The imager (tfs mkimage/extract) is the product repo's own
+      # published binary — releases are the interface; the feedstock
+      # never builds the tebako stack from source. The pin flows from
+      # Tebakofile and is cross-checked against the release's SHA256SUMS,
+      # like the recipe pins the Bun archive's.
+      - name: Fetch the imager (pinned by Tebakofile, sha256-verified)
+        shell: bash
+        env:
+          TFS_BIN: .packager/tfs${{ matrix.platform.exe_suffix }}
+        run: |
+          set -euo pipefail
+          mkdir -p .packager
+          base="https://github.com/tamatebako/tebako/releases/download/$TEBAKO_RELEASE"
+          curl -sL --fail -o "$TFS_BIN" "$base/$TFS_ASSET"
+          curl -sL --fail -o SHA256SUMS "$base/SHA256SUMS"
+          echo "$TFS_SHA256  $TFS_BIN" | { sha256sum -c - 2>/dev/null || shasum -a 256 -c -; }
+          # The pin must agree with the release's own sums (both anchored).
+          got=$(awk -v a="$TFS_ASSET" '$2 == a {print $1}' SHA256SUMS)
+          [ "$got" = "$TFS_SHA256" ] || { echo "::error::pin mismatch for $TFS_ASSET: Tebakofile=$TFS_SHA256 release=${got:-ABSENT}"; exit 1; }
+          chmod +x "$TFS_BIN"
+          # Bare invocation prints the help and exits 0 (tfs has no
+          # --version flag): the dead-binary smoke, here where the
+          # download just happened, not inside the payload step.
+          "$TFS_BIN" > /dev/null
+
+      # The wrapper exe — the runtime pair's process entry point (spec
+      # 29). Same releases-are-the-interface rule as the imager; ships
+      # since tebako v2.1.0 (the recipe's runtime.wrapper_tebako pin
+      # names the line). It stages into its OWN .packager/wrapper/ dir so
+      # the spec 34 sign block below copies from a folder holding ONLY
+      # shippable PEs — .packager itself also carries the tfs imager exe
+      # (a build tool, never signed).
+      - name: Fetch the wrapper (pinned by Tebakofile)
+        shell: bash
+        env:
+          WRAPPER_BIN: .packager/wrapper/tebako-runtime-launcher${{ matrix.platform.exe_suffix }}
+        run: |
+          set -euo pipefail
+          mkdir -p .packager/wrapper
+          base="https://github.com/tamatebako/tebako/releases/download/$WRAPPER_RELEASE"
+          curl -sL --fail -o "$WRAPPER_BIN" "$base/$WRAPPER_ASSET"
+          echo "$WRAPPER_SHA256  $WRAPPER_BIN" | { sha256sum -c - 2>/dev/null || shasum -a 256 -c -; }
+          chmod +x "$WRAPPER_BIN"
+          echo "WRAPPER_BIN=$WRAPPER_BIN" >> "$GITHUB_ENV"
+
+      # Spec 34 §8.2 — the Windows Authenticode leg (the mirror of
+      # tebako-runtime-ruby#157's _build-platform.yml, itself
+      # tamatebako/tebako PR #566+#570): when the repo variable
+      # WINDOWS_SIGNING_ENABLED=true, the fetched wrapper exe is Azure
+      # Trusted Signed here — after its pin-verified download, BEFORE
+      # tools/build pairs it into out/. Signing rides a sign-staging/
+      # COPY, never the contract path directly (the trr#157 shape): the
+      # action enumerates by EXTENSION, so the staging step copies every
+      # PE under sign-staging/ with a PE extension, the action signs
+      # there, and the verify step moves the signed bytes BACK over the
+      # contract path ($WRAPPER_BIN) before signtool-verifying it there
+      # (signtool verifies content, not filename). Sign-then-hash (spec
+      # 34 §1.3) needs NO re-hash step in this repo: tools/build computes
+      # the wrapper's .sha256 sidecar + the release shard's digest AFTER
+      # this block, so every published hash anchors the SIGNED bytes by
+      # construction, and tools/build's wrapper smoke exercises exactly
+      # the shipped bytes. Gate off: every step below skips and the leg
+      # ships unsigned, byte-identically to today (spec 00 invariant 7 —
+      # §7.4 gate-off parity).
+      - name: Arm check — Windows signing (spec 34 §4)
+        if: matrix.platform.triplet == 'x86_64-windows-ucrt'
+        id: signgate
         shell: bash
         env:
           WINDOWS_SIGNING_ENABLED: ${{ vars.WINDOWS_SIGNING_ENABLED }}
@@ -45,9 +259,512 @@ jobs:
           AZURE_ENDPOINT: ${{ vars.AZURE_ENDPOINT }}
           AZURE_SIGNING_ACCOUNT_NAME: ${{ vars.AZURE_SIGNING_ACCOUNT_NAME }}
           AZURE_SIGNING_CERT_PROFILE: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
-        run: tools/windows-sign-gate.sh
+        run: bash tools/windows-sign-gate.sh
 
-      - name: scaffold notice
+      # The sign-staging copy (the §7.3 soundness shape — trr#157's fix
+      # for run 34490217493, where extension enumeration signed only the
+      # .dll and the contract exe escaped): every PE in the leg's wrapper
+      # dir is COPIED under sign-staging/ with a PE extension, so the
+      # action's extension filter covers everything PE by construction.
+      # The contract exe ($WRAPPER_BIN) ships .exe-SUFFIXED today (the
+      # release asset tebako-runtime-<line>-<ver>-windows-ucrt64.exe),
+      # so the extension sweep already carries it; the case arm below is
+      # the defensive suffixless form (stage as <name>.exe — the rt-ruby
+      # contract shape). COPY, never move: the unsigned originals keep
+      # the contract paths until the verify step restores the signed
+      # bytes over them.
+      - name: Stage the PE artifacts for signing (spec 34 §7.3)
+        if: steps.signgate.outputs.armed == 'true'
         shell: bash
         run: |
-          echo "::notice::factory scaffold — flavor=${{ matrix.flavor }} triplet=${{ matrix.platform.triplet }}: tools/build + the publish legs land with the factory implementation PRs. This run builds nothing."
+          set -euo pipefail
+          test -s "$WRAPPER_BIN" || { echo "::error::spec 34 §7.3: no wrapper executable at $WRAPPER_BIN — nothing to sign"; exit 1; }
+          mkdir -p sign-staging
+          staged=0
+          for pe in .packager/wrapper/*.exe .packager/wrapper/*.dll; do
+            [ -e "$pe" ] || continue
+            cp "$pe" "sign-staging/$(basename "$pe")"
+            staged=$((staged + 1))
+          done
+          # A suffixless contract exe escapes the extension sweep above —
+          # stage it as <name>.exe so the enumeration gate covers it.
+          case "$(basename "$WRAPPER_BIN")" in
+            *.exe|*.dll) : ;;
+            *) cp "$WRAPPER_BIN" "sign-staging/$(basename "$WRAPPER_BIN").exe"; staged=$((staged + 1)) ;;
+          esac
+          [ "$staged" -ge 1 ] || { echo "::error::spec 34 §7.3: no PE artifacts under .packager/wrapper — nothing to sign"; exit 1; }
+          ls -l sign-staging/
+
+      # OIDC workload-identity federation (spec 34 §3): no stored client
+      # secret anywhere; the federated credential is scoped to this repo
+      # × the windows-signing environment this job runs in.
+      - name: Azure login (OIDC, spec 34 §8.2)
+        if: steps.signgate.outputs.armed == 'true'
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2 (sha-pinned 2026-09-11; the v2 tag's v2.3.1 commit, proven on tamatebako/tebako#566+#570 + trr#157)
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Signs the staged PE artifacts in sign-staging/ (the staging step
+      # above copied the leg's PEs there for extension enumeration; the
+      # verify step below restores the signed bytes over the contract
+      # paths). The account input is `signing-account-name` — spec 34
+      # §5's draft `trusted-signing-account-name` is the deprecated alias
+      # at this action's @v1 (the PR #566 deviation, verified against the
+      # action's action.yml); do not "upgrade" the action — @v2 dropped
+      # the input.
+      - name: Sign the staged PE artifacts (spec 34 §8.2)
+        if: steps.signgate.outputs.armed == 'true'
+        uses: Azure/artifact-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # v1 (sha-pinned 2026-09-11; proven on tamatebako/tebako#566+#570 + trr#157)
+        with:
+          endpoint: ${{ vars.AZURE_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+          files-folder: sign-staging
+          # The enumeration gate (§7.3): everything PE signs by
+          # EXTENSION, never a name list — a new PE artifact (a shipped
+          # .dll) must not ship unsigned by omission. Sound by
+          # construction here: the staging dir carries only PE-extension
+          # files, so the filter can miss nothing the gate below would
+          # not also catch by name. The release ships exactly one loose
+          # PE today — the wrapper exe (bun lives INSIDE the .tfs env
+          # image, not as PE files at release level).
+          files-folder-filter: exe,dll
+          file-digest: SHA256
+          # §1.4: the RFC 3161 countersignature is mandatory (the action's
+          # default timestamp server; set explicitly per spec).
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: tebako bun runtime wrapper (tamatebako)
+
+      - name: Verify the signatures (spec 34 §7.1/§7.2)
+        if: steps.signgate.outputs.armed == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # §7.3: enumerate the SIGNED set by EXTENSION at the staging
+          # dir, never a name list.
+          $exes = @(Get-ChildItem -Path 'sign-staging' -Filter '*.exe' -File)
+          $dlls = @(Get-ChildItem -Path 'sign-staging' -Filter '*.dll' -File)
+          $pes = @($exes) + @($dlls)
+          # The fail-closed enumeration gate (§7.3), this repo's shape:
+          # (a) the contract exe — the wrapper — present in the signed
+          # set by name, AND (b) >=1 PE signed total. NOT a dll-nonempty
+          # gate (rt-ruby needs that arm; here bun lives INSIDE the
+          # .tfs env image, so the loose-DLL set is legitimately EMPTY —
+          # any *.dll that ever appears in the wrapper dir stages and
+          # signs by extension and is verified below).
+          if ($pes.Count -eq 0) {
+            Write-Host "::error::spec 34 §7.3: no signed PE artifacts under sign-staging"
+            exit 1
+          }
+          $wrapperBin = $env:WRAPPER_BIN
+          $wrapperName = Split-Path $wrapperBin -Leaf
+          $stagedName = $wrapperName
+          if ($wrapperName -notmatch '\.(exe|dll)$') { $stagedName = "$wrapperName.exe" }
+          $stagedExe = "sign-staging/$stagedName"
+          if (-not (Test-Path $stagedExe -PathType Leaf)) {
+            Write-Host "::error::spec 34 §7.3: $stagedExe missing after the sign action — the wrapper exe escaped signing"
+            exit 1
+          }
+          # Restore the CONTRACT-named paths with the signed bytes,
+          # replacing the unsigned originals the staging step left in
+          # place — tools/build then pairs + hashes + smokes exactly the
+          # shipped (signed) bytes (sign-then-hash, §1.3). The verify
+          # loop below runs at the restored paths: signtool verifies
+          # content, not filename.
+          Move-Item -Force $stagedExe $wrapperBin
+          $restored = @(Get-Item $wrapperBin)
+          foreach ($pe in $pes) {
+            if ($pe.Name -eq $stagedName) { continue }
+            $target = ".packager/wrapper/$($pe.Name)"
+            Move-Item -Force $pe.FullName $target
+            $restored += Get-Item $target
+          }
+          # signtool.exe: the action's cached BuildTools first (the
+          # TrustedSigning module still owns that directory name at
+          # action @v1; the ArtifactSigning spelling is kept as a
+          # forward-compat fallback), then the runner image's Windows
+          # Kits; newest path first.
+          $signtool = @(
+            Get-ChildItem -Path "$env:LOCALAPPDATA\TrustedSigning\Microsoft.Windows.SDK.BuildTools" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue
+            Get-ChildItem -Path "$env:LOCALAPPDATA\ArtifactSigning\Microsoft.Windows.SDK.BuildTools" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue
+            Get-ChildItem -Path 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue
+          ) | Where-Object { $_.FullName -match '\\x64\\' } |
+              Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) {
+            Write-Host "::error::spec 34 §7.1: signtool.exe not found (action BuildTools cache and Windows Kits both empty)"
+            exit 1
+          }
+          Write-Host "signtool: $($signtool.FullName)"
+          $failed = $false
+          foreach ($pe in $restored) {
+            Write-Host "== signtool verify /pa /v $($pe.Name)"
+            $out = & $signtool.FullName verify /pa /v $pe.FullName 2>&1 | Out-String
+            Write-Host $out
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error::spec 34 §7.1: signtool verify /pa FAILED for $($pe.Name)"
+              $failed = $true
+              continue
+            }
+            # §7.2/§1.4: the RFC 3161 countersignature is mandatory — an
+            # untimestamped signature fails the leg, never a warning.
+            if ($out -notmatch 'signature is timestamped' -and $out -notmatch 'RFC ?3161') {
+              Write-Host "::error::spec 34 §7.2: no RFC 3161 timestamp countersignature in signtool output for $($pe.Name)"
+              $failed = $true
+              continue
+            }
+            $sig = Get-AuthenticodeSignature $pe.FullName
+            if ($sig.Status -ne 'Valid') {
+              Write-Host "::error::spec 34 §7.1: Get-AuthenticodeSignature status '$($sig.Status)' (not Valid) for $($pe.Name)"
+              $failed = $true
+              continue
+            }
+            if ($null -eq $sig.TimeStamperCertificate) {
+              Write-Host "::error::spec 34 §7.2: Get-AuthenticodeSignature reports no TimeStamperCertificate for $($pe.Name)"
+              $failed = $true
+              continue
+            }
+            Write-Host "signed+timestamped: $($pe.Name) — $($sig.SignerCertificate.Subject)"
+          }
+          if ($failed) { exit 1 }
+
+      # The preload shim (POSIX legs only): the link-unit tarball carries
+      # libtfs_preload for the layout's preload_shim grant — the jail's
+      # host-IO binding survives the exec into bun. NOT in the
+      # release's SHA256SUMS monolith: the recipe pin is the anchor.
+      - name: Fetch the preload shim (link-unit, pinned by Tebakofile)
+        if: matrix.platform.exe_suffix == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .packager
+          base="https://github.com/tamatebako/tebako/releases/download/$TEBAKO_RELEASE"
+          curl -sL --fail -o .packager/link-unit.tar.gz "$base/$LINK_UNIT_ASSET"
+          echo "$LINK_UNIT_SHA256  .packager/link-unit.tar.gz" | { sha256sum -c - 2>/dev/null || shasum -a 256 -c -; }
+          tar -xzf .packager/link-unit.tar.gz -C .packager
+          [ -f "$PRELOAD_SHIM" ] || { echo "::error::link-unit tarball carries no $PRELOAD_SHIM"; exit 1; }
+
+      - name: Build the runtime pair
+        shell: bash
+        env:
+          TRIPLET: ${{ matrix.platform.triplet }}
+          ASSET_PLATFORM: ${{ matrix.platform.asset_platform }}
+          EXE_SUFFIX: ${{ matrix.platform.exe_suffix }}
+          TAR: ${{ matrix.platform.tar }}
+          TFS_CLI: .packager/tfs${{ matrix.platform.exe_suffix }}
+          FLAVOR: ${{ matrix.flavor }}
+          # The signing arm (spec 09 §5): on signing-enabled lines
+          # tools/build declares each artifact's `signature` block
+          # ({keyid, asc} — the repo variable names the signer's PRIMARY
+          # keyid) in the release shard, and the leg's sign pass below
+          # produces exactly those .asc assets. Armed + no keyid fails
+          # the build named, before anything publishes.
+          TEBAKO_RELEASE_SIGNING_ENABLED: ${{ vars.TEBAKO_RELEASE_SIGNING_ENABLED }}
+          TEBAKO_RELEASE_SIGNING_KEYID: ${{ vars.TEBAKO_RELEASE_SIGNING_KEYID }}
+        # WRAPPER_BIN (the fetch step) and PRELOAD_SHIM (pins.rb, POSIX
+        # only) flow through $GITHUB_ENV — process env, not the static
+        # env: context. The windows leg runs a closed PATH: the runner's
+        # default PATH carries several stray mingw installs, and keeping
+        # them out of DLL/tool resolution removes a whole silent-failure
+        # class.
+        run: |
+          if [ "${{ matrix.platform.triplet }}" = "x86_64-windows-ucrt" ]; then
+            export PATH="/d/a/_temp/msys64/ucrt64/bin:/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32"
+          fi
+          tools/build
+
+      - name: Upload payload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: payload-${{ matrix.flavor }}-${{ matrix.platform.triplet }}
+          path: out/${{ matrix.flavor }}-${{ matrix.platform.triplet }}/
+          retention-days: 7
+
+      - name: Setup Ruby for the release tooling
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      # Spec 13 §2a (the de-rendezvous): the leg that built a
+      # pair publishes it — the write-once names THIS leg owns alone (the
+      # wrapper exe, the .tfs env image, both .sha256 sidecars, the
+      # <stem>.manifest.json shard) — so N legs publish concurrently with
+      # zero rendezvous. The release is created by the FIRST leg that
+      # finds it missing (the notes are written once there, never
+      # rewritten); the loser's create 422s and it rides the winner's
+      # release. Write-once per name: an already-served name with the
+      # same digest is a skip, with different bytes a loud KEEP — a
+      # re-run never replaces (a bad asset's remedy is `status:
+      # withdrawn` in the registry + the next patch line, spec 04 §2).
+      - name: Publish the leg's runtime pair (spec 13 §2a)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo="tamatebako/tebako-runtime-bun"
+          tag="${{ github.ref_name }}"
+          out="out/${{ matrix.flavor }}-${{ matrix.platform.triplet }}"
+          # notes.md, not notes="$(cat <<…)" — a heredoc body inside
+          # "$( )" trips the macOS bash 3.2 quote parser on any apostrophe
+          # in the text ("store's" cost the v2.8.21 mac legs); a plain
+          # heredoc-to-file parses on every bash.
+          cat > notes.md <<'NOTES'
+          ## Tebako bun runtime pairs
+
+          Release line: this tag IS the tebako product line the pairs build against.
+
+          Every runtime pair (the wrapper exe + its `.tfs` env image) ships with its
+          own metadata, written once by the build leg that produced it (spec 13 §2a):
+          the `<asset>.sha256` sidecar next to every asset is the trust anchor (the
+          tebako store's own sidecar shape, spec 00 §8), and the
+          `<stem>.manifest.json` shard next to every pair carries exactly its
+          release-index entry. On signing-enabled lines every served name also
+          carries its own detached `.asc` (spec 09 §5).
+
+          There is no monolithic `manifest.json` / `SHA256SUMS.txt` release asset:
+          each shard IS its own release-index entry (the resolver's primary form),
+          and both monoliths are derivable conveniences, computed consumer-side
+          from the shards + the asset listing. The machine-readable
+          resolution index is this repo's `tpkg-registry.yaml` (spec 04 §2).
+          NOTES
+          if ! gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$repo" \
+              --title "$tag — tebako-runtime bun (oven-sh Bun)" \
+              --notes-file notes.md \
+              || gh release view "$tag" --repo "$repo" > /dev/null
+          fi
+          gh release view "$tag" --repo "$repo" --json assets \
+            --jq '.assets[] | .name + " " + .digest' > listed.txt
+          sha256_of() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; } | cut -d' ' -f1; }
+          stem="$RUNTIME_STEM"
+          exe="$stem${{ matrix.platform.exe_suffix }}"
+          # The shard is a bash-rendered heredoc — prove it parses BEFORE
+          # any of its bytes ship (the retired monolith derive was the
+          # only JSON gate; nothing downstream may find a malformed shard).
+          ruby -rjson -e 'JSON.parse(File.read(ARGV[0]))' "$out/$stem.manifest.json" || {
+            echo "::error::the release shard $out/$stem.manifest.json is not valid JSON — refusing to publish"
+            exit 1
+          }
+          for name in "$exe" "$exe.sha256" "$stem.tfs" "$stem.tfs.sha256" "$stem.manifest.json"; do
+            f="$out/$name"
+            [ -f "$f" ] || { echo "::error::leg output $f missing — tools/build did not produce it"; exit 1; }
+            want="$(sha256_of "$f")"
+            got="$(awk -v n="$name" '$1 == n { d=$2; sub(/^sha256:/, "", d); print d }' listed.txt | head -1)"
+            if [ "$got" = "$want" ]; then
+              echo "$name already on the release (digest match) — write-once skip"
+              continue
+            fi
+            if [ -n "$got" ]; then
+              echo "::warning::$name is already on the release with DIFFERENT bytes (served $got, built $want) — write-once per name (spec 13 §2a): keeping the served bytes; a fix ships as the next patch line"
+              continue
+            fi
+            gh release upload "$tag" --repo "$repo" "$f"
+          done
+
+      # Spec 09 §5's no-fold rule: the leg signs every served name it
+      # owns — the pair, the sidecars, the shard — in the same leg that
+      # holds the fresh bytes (SIGN_ONLY_STEMS scopes the pass to them;
+      # SIGN_LOCAL_DIR points at them). The gate lives INSIDE the script:
+      # TEBAKO_RELEASE_SIGNING_ENABLED=true arms it; armed + an empty
+      # TEBAKO_RELEASE_SIGNING_KEY secret is a fast named failure;
+      # disarmed exits 0 and the release ships unsigned (unsigned stays
+      # first-class — spec 09 §3). The audit in the release job asserts
+      # the whole matrix's .asc coverage after every leg ran.
+      - name: Sign the leg's release assets (spec 09 §5)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The gem's signer is sign-only here: no adapter file, the repo
+          # declaration rides the env (TebakoRelease::Config.from_env).
+          TEBAKO_RELEASE_REPO: tamatebako/tebako-runtime-bun
+          TEBAKO_PKG_HOST_ID: ${{ matrix.platform.asset_platform }}
+          TEBAKO_RELEASE_SIGNING_ENABLED: ${{ vars.TEBAKO_RELEASE_SIGNING_ENABLED }}
+          TEBAKO_RELEASE_SIGNING_KEY: ${{ secrets.TEBAKO_RELEASE_SIGNING_KEY }}
+        # RUNTIME_STEM flows from pins.rb's $GITHUB_ENV export — process
+        # env, not the static env: context. The tag IS the tebako product
+        # line (v<line>); the signer wants the bare version.
+        run: |
+          set -euo pipefail
+          SIGN_ONLY_STEMS="$RUNTIME_STEM" \
+            SIGN_LOCAL_DIR="out/${{ matrix.flavor }}-${{ matrix.platform.triplet }}" \
+            TEBAKO_VERSION="${GITHUB_REF_NAME#v}" bundle exec tebako-release sign
+
+  # The ONE release job per tag run. Spec 13 §2a's de-rendezvous moved
+  # the publish + sign into the legs (write-once per-leg names — no
+  # shared release-asset mutation remains); what serializes here is only
+  # the two duties that need the whole matrix: the AUDIT (every leg's
+  # expected names verified against the release listing, read-only) and
+  # the registry render + bot PR (git arbitrates the PR).
+  release:
+    name: audit + registry
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Guard — the tag IS the tebako product line
+        # The composed-name fetch path ({base}/v<line>/<asset>, spec 13
+        # §2a) resolves release AND asset stem from the one pin, so a tag
+        # that disagrees with Tebakofile's runtime.wrapper_tebako
+        # publishes a release no consumer can fetch (v2.5.1's 2.5.0-named
+        # assets 404'd every composed fetch — the metanorma 1.16.9-11
+        # publish died on exactly that). Fail before any mutation.
+        run: |
+          set -euo pipefail
+          eval "$(ruby tools/pins.rb macos-arm64)"
+          if [ "$GITHUB_REF_NAME" != "$WRAPPER_RELEASE" ]; then
+            echo "::error::tag $GITHUB_REF_NAME ≠ runtime.wrapper_tebako ($WRAPPER_RELEASE) — the tag IS the tebako product line; reline Tebakofile or retag"
+            exit 1
+          fi
+      - name: Setup Ruby for the release tooling
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      # The audit (spec 13 §2a — completeness is a QUERY, read-only): the
+      # legs already published + signed their pairs in-leg, so this step
+      # never downloads a byte — it verifies the whole matrix's expected
+      # names (pairs, .sha256 sidecars, shards, and — on signing-enabled
+      # lines — every .asc, spec 09 §5) against the release's own
+      # listing, and refuses the retired monoliths. A gap fails the job
+      # BEFORE the registry render (a partial release never mirrors).
+      - name: Audit the release (spec 13 §2a)
+        env:
+          TEBAKO_RELEASE_SIGNING_ENABLED: ${{ vars.TEBAKO_RELEASE_SIGNING_ENABLED }}
+        # The tag IS the tebako product line (v<line>); the tool wants
+        # the bare version.
+        run: TEBAKO_VERSION="${GITHUB_REF_NAME#v}" ./tools/audit_release.rb
+      # The registry mirror (spec 04 §2): rendered from the release's own
+      # shards — the write-once per-leg metadata units, ground truth —
+      # never from a template's local knowledge. Existing versions keep
+      # their rows; `status: withdrawn` marks survive every render.
+      - name: Render the registry entries
+        run: TEBAKO_VERSION="${GITHUB_REF_NAME#v}" ./tools/registry_update.rb
+      # The registry lands by bot PR, never a direct push to main (the
+      # sibling factories' main branches are protected; this repo keeps
+      # the same flow so a protection flip is a no-op). The PR rides the
+      # CI PAT: a GITHUB_TOKEN-authored PR triggers NO workflow runs
+      # (tamatebako/tebako#686), and a protected main would hold such a
+      # PR open forever — the PAT's PR runs lint + the registry-only
+      # fast path (the `changes` job above) and auto-merges when green.
+      # Idempotent across re-runs of the same tag.
+      - name: Publish the registry entry via pull request
+        env:
+          GH_TOKEN: ${{ secrets.TEBAKO_CI_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cp tpkg-registry.yaml "$RUNNER_TEMP/registry.yaml"
+          git config user.name "tebako-ci"
+          git config user.email "tebako@ribose.com"
+          git fetch origin main
+          branch="publish/${{ github.ref_name }}-registry"
+          # The render just rewrote the worktree's tpkg-registry.yaml —
+          # restore the checkout's copy before branching so the branch
+          # starts clean (the render rides $RUNNER_TEMP).
+          git checkout -- tpkg-registry.yaml
+          git checkout -b "$branch" origin/main
+          cp "$RUNNER_TEMP/registry.yaml" tpkg-registry.yaml
+          if git diff --quiet origin/main -- tpkg-registry.yaml; then
+            echo "registry unchanged (or the entry already landed on main)"
+            exit 0
+          fi
+          git add tpkg-registry.yaml
+          git commit -m "publish ${{ github.ref_name }}: registry entry"
+          # force-with-lease on the bot branch: a re-publish re-creates it
+          # (the first attempt's branch rejected the second's push,
+          # 21.0.12). Fetch the remote ref first so the lease has
+          # something to check against — a re-run where the branch exists
+          # remotely but not locally would otherwise push WITHOUT the
+          # lease check.
+          git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null || true
+          git push --force-with-lease origin "$branch"
+          if ! gh pr view "$branch" >/dev/null 2>&1; then
+            body="$RUNNER_TEMP/registry-pr-body.md"
+            # The heredoc body sits at the YAML block's base indent so it
+            # de-indents to column 0: `<<'` (no dash) keeps leading
+            # whitespace, and a Markdown body indented 4+ spaces renders
+            # as a code block.
+            cat > "$body" <<'EOF'
+          Automated registry entries for this release — rendered from the
+          release's per-package .manifest.json shards by tools/registry_update.rb
+          (spec 13 §2a's audit+registry job; spec 04 §2's mirror). The registry
+          lands by PR, never a direct push to main.
+          EOF
+            gh pr create --base main --head "$branch" \
+              --title "publish ${{ github.ref_name }}: registry entry" \
+              --body-file "$body"
+          fi
+          gh pr merge --auto --squash "$branch" || gh pr merge --squash "$branch"
+
+  # The terminal aggregate — and the branch-protection gate. The build
+  # legs are a dynamic matrix whose check names shift with the matrix
+  # vocabulary (a new flavor or triplet renames every leg), so branch
+  # protection pins THIS job's one stable check name (`all legs green`)
+  # instead of any leg's. Green means: every build leg succeeded, and —
+  # on tag runs — the audit + registry job succeeded too (a branch/PR
+  # run skips it legitimately; signing rides in-leg, spec 13 §2a, so
+  # there is no separate publish/sign job to gate). `always() &&
+  # !cancelled()`: without it a failed upstream job would SKIP this one,
+  # and a skipped required check reads as satisfied — the gate must
+  # report red, never vanish.
+  verify:
+    name: all legs green
+    needs: [changes, build, release]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on the legs
+        run: |
+          set -euo pipefail
+          echo "ref:           ${{ github.ref }} (${{ github.event_name }})"
+          echo "registry_only: ${{ needs.changes.outputs.registry_only }}"
+          echo "build:         ${{ needs.build.result }}"
+          echo "release:       ${{ needs.release.result }}"
+          # tamatebako/tebako#686: a registry-only PR (the bot's
+          # publish/*-registry) skips the build legs BY DESIGN — there is
+          # no buildable surface in a tpkg-registry.yaml-only diff; the
+          # lint workflow's parse gate covers it. The skip must be the
+          # skip (a leg that RAN on a registry-only PR means the
+          # detection broke — say so, don't silently pass).
+          if [ "${{ needs.changes.outputs.registry_only }}" = "true" ]; then
+            if [ "${{ needs.build.result }}" != "skipped" ]; then
+              echo "::error::registry-only PR but the build legs did not skip: ${{ needs.build.result }}"
+              exit 1
+            fi
+            echo "registry-only PR: the build legs skipped by design (tebako#686)"
+            exit 0
+          fi
+          # Every build leg must be green, on every other event.
+          if [ "${{ needs.build.result }}" != "success" ]; then
+            echo "::error::not every build leg succeeded: ${{ needs.build.result }}"
+            exit 1
+          fi
+          # The audit + registry job exists on tag runs only; a branch/PR
+          # run skips it legitimately — any other non-success is red.
+          case "${{ needs.release.result }}" in
+            success | skipped) : ;;
+            *)
+              echo "::error::the audit + registry job did not complete cleanly: ${{ needs.release.result }}"
+              exit 1
+              ;;
+          esac
+          # On a tag run a skip is a bug: the publish gate must be green.
+          case "${{ github.ref }}" in
+            refs/tags/*)
+              if [ "${{ needs.release.result }}" != "success" ]; then
+                echo "::error::tag run with the audit + registry job at '${{ needs.release.result }}' — it must succeed on a tag"
+                exit 1
+              fi
+              ;;
+          esac
