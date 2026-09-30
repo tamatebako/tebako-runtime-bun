@@ -106,6 +106,9 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
+      # attestations: the SLSA L3 provenance arm at the leg tail (gated
+      # with the publish/sign steps — tag runs only; disarmed otherwise).
+      attestations: write
     # Spec 34's attestation boundary (see the id-token note above). The
     # build job is shared by every platform's legs — only the windows
     # legs ever arm the signing chain, but ALL legs carry the
@@ -596,6 +599,36 @@ jobs:
           SIGN_ONLY_STEMS="$RUNTIME_STEM" \
             SIGN_LOCAL_DIR="out/${{ matrix.flavor }}-${{ matrix.platform.triplet }}" \
             TEBAKO_VERSION="${GITHUB_REF_NAME#v}" bundle exec tebako-release sign
+
+      # SLSA L3 provenance over the exact served names (gated with the
+      # publish/sign steps above — tag runs only; push/PR/dispatch runs
+      # never attest). The staging copy mirrors the publish loop's name
+      # list verbatim: the sibling payload-<flavor>-<triplet>.yaml never
+      # ships, so the attestation never names it.
+      - name: Stage the attestation subjects (the exact served names)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="out/${{ matrix.flavor }}-${{ matrix.platform.triplet }}"
+          stem="$RUNTIME_STEM"
+          exe="$stem${{ matrix.platform.exe_suffix }}"
+          mkdir -p attest-staging
+          for name in "$exe" "$exe.sha256" "$stem.tfs" "$stem.tfs.sha256" "$stem.manifest.json"; do
+            cp "$out/$name" attest-staging/
+          done
+          # The detached .asc set, when the signing arm ran (the signer
+          # converges it into the same dir — SIGN_LOCAL_DIR above).
+          for asc in "$out/$stem"*.asc; do
+            [ -e "$asc" ] || continue
+            cp "$asc" attest-staging/
+          done
+
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: attest-staging/*
 
   # The ONE release job per tag run. Spec 13 §2a's de-rendezvous moved
   # the publish + sign into the legs (write-once per-leg names — no
