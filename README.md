@@ -20,13 +20,27 @@ directly, with no press-compile step.
   never discovered at run time.
   Bun rolls weekly on 1.x — this factory pins exact versions, never
   `latest`.
-- **artifacts:** `tebako-runtime-<tebako-line>-1.4.2-<platform>[.exe]`
+- **artifacts:** `tebako-runtime-<tebako-line>-<implementation>-<version>-<platform>[.exe]`
   + `.tfs` + `.sha256` sidecars + `<stem>.manifest.json` release shards
   (+ a detached `.asc` per served name on signing-enabled lines), and
   this registry (`tpkg-registry.yaml`) on the repo's default branch
 - **visibility:** the locked default order — preload on POSIX (with the
   link-unit preload shim granted), the exec cache on windows (the
   payload root is declared `home`, so the whole tree materializes there)
+
+The artifact name carries the distribution segment
+([tebako#716](https://github.com/tamatebako/tebako/issues/716)): new
+publishes spell
+`tebako-runtime-<tebako-line>-<implementation>-<version>-<platform>`,
+where `<implementation>` is the flavor's identity (`bun` today — the
+recipe ships one implementation, oven-sh's build; a future distribution
+variant slots its own segment in through its flavor block). Releases
+already published keep the segment-less spelling
+(`tebako-runtime-<tebako-line>-<version>-<platform>`) forever: they are
+immutable and sha256-pinned in this registry, and re-running an old tag
+composes that ref's own names, self-consistently. Tooling that reads
+artifact names (the registry mirror, the release gem) accepts both
+spellings.
 
 Consumers' app payloads declare
 `runtime_requirement: {engine: bun, constraint: ">= 1.4"}` on their

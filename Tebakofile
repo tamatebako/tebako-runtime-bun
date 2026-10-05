@@ -81,7 +81,8 @@ runtime:
   mount_root_override: false       # closed default — bun is one self-contained binary with no home tree to relocate; granting a no-op knob violates spec 00 §9
   # The tebako product line the pair builds against: the wrapper exe
   # (tebako-runtime-launcher) and the preload shim (link-unit). The line
-  # number names the artifacts (tebako-runtime-2.8.22-1.4.2-*) and the
+  # number names the artifacts (tebako-runtime-2.8.22-bun-1.4.2-* since
+  # tebako#716 — the flavor's implementation segment) and the
   # release tag (v2.8.22 — the trr convention: the tag IS the tebako
   # line).
   #
@@ -118,7 +119,13 @@ tools:
   # the Gemfile resolves (the sign step's tebako-release exe). The gem is
   # the signer's single owner (ecosystem invariant 10) — this feedstock
   # carries no copy of it.
-  release_tooling: "v0.2.1"
+  #
+  # v0.5.1: tebako#716's dual-era package-name grammar (on the v0.5.0
+  # seam; v0.5.1 is the publish-leg convergence hardening on top). This
+  # feedstock's sign pass is adapter-less and composes no names
+  # (SIGN_ONLY_STEMS flows pins.rb's stem), so the bump is transparent —
+  # it keeps the tooling line on the gem every sibling factory pins.
+  release_tooling: "v0.5.1"
   sha256:
     tfs:
       macos-arm64: "08f201f20e808dc0d4253e1617a3dc549a1a316132fdce9d81457645049d2eda"

@@ -14,10 +14,12 @@
 # /lib/tebako/layout.yaml, image with tfs-cli's in-process writer
 # (limnifs, the default format), then pair the env image with the
 # wrapper exe (tebako-runtime-launcher — the tebako-owned process entry
-# point, spec 29) under the runtime naming grammar:
+# point, spec 29) under the runtime naming grammar (tebako#716's
+# language segment is this feedstock's distribution identity — the
+# flavor's implementation):
 #
-#   tebako-runtime-<tebako-line>-<lang-version>-<asset-platform>[.exe]
-#   tebako-runtime-<tebako-line>-<lang-version>-<asset-platform>.tfs
+#   tebako-runtime-<tebako-line>-<implementation>-<lang-version>-<asset-platform>[.exe]
+#   tebako-runtime-<tebako-line>-<implementation>-<lang-version>-<asset-platform>.tfs
 #
 # plus per-asset .sha256 sidecars and the <stem>.manifest.json release
 # shard (spec 13 §2a: the leg that built the pair publishes its
@@ -43,7 +45,7 @@
 #   WORK           build workspace (default: out/work-$FLAVOR-$TRIPLET)
 #   OUT            artifact dir   (default: out/$FLAVOR-$TRIPLET)
 #
-# Produces: $OUT/tebako-runtime-<line>-<ver>-<asset>.tfs + the wrapper
+# Produces: $OUT/tebako-runtime-<line>-<impl>-<ver>-<asset>.tfs + the wrapper
 # exe + sidecars + shard (+ payload-$FLAVOR-$TRIPLET.yaml, the release-tier
 # manifest with the real blob sha).
 set -euo pipefail
@@ -202,7 +204,11 @@ esac
 # the manifest's upstream-commit spelling (a repack pins no git commit).
 UPSTREAM_REF="$(basename "$(dirname "$URL")")"
 
-STEM="tebako-runtime-$WRAPPER_TEBAKO-$VERSION-$ASSET_PLATFORM"
+# The pair stem carries tebako#716's language segment — the flavor's
+# implementation (IMPLEMENTATION is presence-checked above; tools/pins.rb
+# and tools/lib/feedstock.rb compose the same grammar from the same
+# recipe values).
+STEM="tebako-runtime-$WRAPPER_TEBAKO-$IMPLEMENTATION-$VERSION-$ASSET_PLATFORM"
 
 mkdir -p "$WORK" "$OUT"
 
