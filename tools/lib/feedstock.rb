@@ -123,10 +123,25 @@ module Feedstock
     end
   end
 
-  # The spec 13 release-asset stem grammar (tebako-runtime-<line>-<ver>-
-  # <asset-platform>) over recipe-owned values.
+  # The flavor's distribution identity (Tebakofile's
+  # flavors.<flavor>.implementation — tebako#716's language segment of the
+  # runtime pair's name; the registry entry's implementation key).
+  def flavor_implementation(flavor, env = ENV)
+    implementation = recipe(env).dig("flavors", flavor, "implementation")
+    return implementation if implementation.is_a?(String) && implementation.match?(/\A[a-z0-9]+\z/)
+
+    raise FeedstockError,
+          "NAMED FAILURE: #{recipe_path(env)} carries no flavors.#{flavor}.implementation " \
+          "(a dash-free [a-z0-9]+ segment) — the pair's name composes it"
+  end
+
+  # The spec 13 release-asset stem grammar over recipe-owned values —
+  # tebako-runtime-<line>-<implementation>-<ver>-<asset-platform>
+  # (tebako#716's language segment is the flavor's implementation;
+  # tools/pins.rb and tools/build compose the same grammar).
   def runtime_stem(flavor, asset_platform, env = ENV)
-    "tebako-runtime-#{wrapper_tebako(env)}-#{flavor_version(flavor, env)}-#{asset_platform}"
+    "tebako-runtime-#{wrapper_tebako(env)}-#{flavor_implementation(flavor, env)}" \
+      "-#{flavor_version(flavor, env)}-#{asset_platform}"
   end
 
   # The write-once names one leg owns (spec 13 §2a): the pair (wrapper

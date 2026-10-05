@@ -24,6 +24,18 @@
 # <TOOL>_ASSET/<TOOL>_SHA256 (link-unit names a .tar.gz, the CLIs name
 # bare binaries).
 #
+# tebako#716's language segment of the runtime pair's name is THIS
+# feedstock's distribution identity — the flavor's `implementation`
+# ("bun"; the recipe ships one implementation today — oven-sh's build —
+# and a future distribution variant slots its own segment in through
+# its flavor block): new publishes spell
+# tebako-runtime-<line>-bun-<ver>-<platform>. No era gate: a re-run of
+# an old tag checks out that tag's own pins.rb / tools/build and
+# composes that ref's names, self-consistently — the already-published
+# segment-less spellings never change (spec 05 §2's era law). The
+# implementation flows from the SELECTED flavor block, never a
+# hardcoded value.
+#
 # NEVER emit a bare TEBAKO_VERSION: in the sibling feedstocks tools/build
 # uses that name for the RUNTIME release line with an env override, so a
 # tools-version export silently clobbers the runtime pin (the 2026-08-27
@@ -64,6 +76,7 @@ flavor_block = flavors[flavor] or
 
 runtime = recipe.fetch("runtime")
 wrapper_tebako = runtime.fetch("wrapper_tebako")
+implementation = flavor_block.fetch("implementation")
 pkg_version = flavor_block.dig("upstream", "version") ||
               die("Tebakofile flavors.#{flavor}.upstream.version missing")
 
@@ -72,7 +85,7 @@ pairs = {
   "PKG_NAME" => recipe.fetch("name"),
   "PKG_VERSION" => pkg_version,
   "FLAVOR" => flavor,
-  "IMPLEMENTATION" => flavor_block.fetch("implementation"),
+  "IMPLEMENTATION" => implementation,
 }
 
 unless ARGV.include?("--release-only")
@@ -107,7 +120,11 @@ unless ARGV.include?("--release-only")
   wrapper_shas = runtime.fetch("wrapper_sha256")
   pairs["WRAPPER_SHA256"] = wrapper_shas[platform] ||
                             die("Tebakofile: no runtime.wrapper_sha256.#{platform} pin")
-  pairs["RUNTIME_STEM_BASE"] = "tebako-runtime-#{wrapper_tebako}-#{pkg_version}"
+  # The pair's name carries tebako#716's language segment — the flavor's
+  # implementation ("bun"): tebako-runtime-<line>-bun-<ver>-<platform>.
+  # tools/build and tools/lib/feedstock.rb compose the same grammar from
+  # the same recipe values.
+  pairs["RUNTIME_STEM_BASE"] = "tebako-runtime-#{wrapper_tebako}-#{implementation}-#{pkg_version}"
   pairs["RUNTIME_STEM"] = "#{pairs['RUNTIME_STEM_BASE']}-#{platform}"
   # The extracted preload shim (POSIX legs only; the windows image omits
   # the grant — see manifests/layout.yaml). The tarball's internal top
