@@ -13,11 +13,13 @@ directly, with no press-compile step.
 - **kind:** runtime (`engine: bun`, `implementation: bun`)
 - **upstream:** Bun 1.4.2 (oven-sh/bun), repacked — no compilation. The
   x64 legs ship the **baseline** builds (no AVX requirement) for
-  universal reach. There is no linux-musl leg YET: upstream ships musl
-  builds (`bun-linux-x64-musl-baseline`, `bun-linux-aarch64-musl`) and
-  the tebako product ships the full musl toolchain at v2.8.22 — the two
-  legs are tracked in issue #2 and will land as declared recipe rows,
-  never discovered at run time.
+  universal reach. The linux-musl legs (issue #2) repack upstream's musl
+  builds (`bun-linux-x64-musl-baseline`, `bun-linux-aarch64-musl`)
+  against the tebako product's full musl toolchain at v2.8.22 — declared
+  recipe rows, never discovered at run time. Upstream's musl binary is
+  musl-dynamic (it links `libstdc++.so.6` beyond libc.musl), so the musl
+  legs' imager smoke + build step ride an alpine container docker-run
+  from the ubuntu host (the sibling factories' container grammar).
   Bun rolls weekly on 1.x — this factory pins exact versions, never
   `latest`.
 - **artifacts:** `tebako-runtime-<tebako-line>-<implementation>-<version>-<platform>[.exe]`
@@ -58,7 +60,7 @@ wrong-line resolution is a named error, never a segfault.
 > wire directly (`--tebako-entry bun …` on the wrapper exe).
 
 Platform coverage follows the tebako launcher's: macOS (arm64, x86_64),
-linux (gnu, x86_64 + arm64), windows (x86_64). The aarch64-windows leg
+linux (gnu + musl, x86_64 + arm64), windows (x86_64). The aarch64-windows leg
 lands when the product ships `tebako-runtime-launcher` for
 windows-ucrt-arm64 — upstream's windows-arm64 build is native since
 v1.3.10, so only the wrapper is missing. Note for that leg when it

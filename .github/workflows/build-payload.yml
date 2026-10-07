@@ -3,7 +3,13 @@ name: build-payload
 # sign IN-LEG. One mechanical leg per (flavor × version × platform) —
 # flavors are the spec 28 §8 implementation axis (official is bun's only
 # implementation today), platforms aarch64-macos + x86_64-macos +
-# x86_64-linux-gnu + aarch64-linux-gnu + x86_64-windows-ucrt.
+# x86_64-linux-gnu + aarch64-linux-gnu + x86_64-linux-musl +
+# aarch64-linux-musl + x86_64-windows-ucrt. The musl legs' binaries (the
+# tfs imager, the wrapper exe, the staged bun) are musl-DYNAMIC — they
+# need a musl userland, so the imager smoke + the build step docker-run
+# the leg's alpine container from the ubuntu host (the ruby/python
+# factories' container grammar; node actions cannot run on musl, so the
+# job-level container: form is out).
 #
 # kind: runtime (spec 28/29): each leg ships the PAIR — the wrapper exe
 # (tebako-runtime-launcher) + the env image (.tfs) + sidecars + the
@@ -147,6 +153,25 @@ jobs:
             os: ubuntu-24.04-arm
             exe_suffix: ""
             tar: bsdtar
+          # The linux-musl legs (issue #2): upstream ships musl builds
+          # and the product ships the full musl toolchain at v2.8.22.
+          # `container` names the alpine userland the imager smoke + the
+          # build step docker-run (the leg's musl-dynamic binaries —
+          # imager, wrapper, bun — cannot execute on the glibc host; the
+          # tebako side needs libc.musl only, bun also a musl-linked
+          # libstdc++, apk-added in-leg).
+          - triplet: x86_64-linux-musl
+            asset_platform: linux-musl-x86_64
+            os: ubuntu-24.04
+            exe_suffix: ""
+            tar: bsdtar
+            container: alpine:3.21
+          - triplet: aarch64-linux-musl
+            asset_platform: linux-musl-arm64
+            os: ubuntu-24.04-arm
+            exe_suffix: ""
+            tar: bsdtar
+            container: alpine:3.21
           - triplet: x86_64-windows-ucrt
             asset_platform: windows-ucrt64
             os: windows-latest
@@ -195,6 +220,7 @@ jobs:
         shell: bash
         env:
           TFS_BIN: .packager/tfs${{ matrix.platform.exe_suffix }}
+          CONTAINER: ${{ matrix.platform.container }}
         run: |
           set -euo pipefail
           mkdir -p .packager
@@ -208,8 +234,16 @@ jobs:
           chmod +x "$TFS_BIN"
           # Bare invocation prints the help and exits 0 (tfs has no
           # --version flag): the dead-binary smoke, here where the
-          # download just happened, not inside the payload step.
-          "$TFS_BIN" > /dev/null
+          # download just happened, not inside the payload step. The musl
+          # legs' imager is musl-dynamic — it cannot run on the glibc
+          # host — so the smoke rides the leg's container, the workspace
+          # bind-mounted at its host path so the relative TFS_BIN holds.
+          if [ -n "$CONTAINER" ]; then
+            docker run --rm -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+              "$CONTAINER" "$TFS_BIN" > /dev/null
+          else
+            "$TFS_BIN" > /dev/null
+          fi
 
       # The wrapper exe — the runtime pair's process entry point (spec
       # 29). Same releases-are-the-interface rule as the imager; ships
@@ -458,6 +492,7 @@ jobs:
           TAR: ${{ matrix.platform.tar }}
           TFS_CLI: .packager/tfs${{ matrix.platform.exe_suffix }}
           FLAVOR: ${{ matrix.flavor }}
+          CONTAINER: ${{ matrix.platform.container }}
           # The signing arm (spec 09 §5): on signing-enabled lines
           # tools/build declares each artifact's `signature` block
           # ({keyid, asc} — the repo variable names the signer's PRIMARY
@@ -473,10 +508,33 @@ jobs:
         # them out of DLL/tool resolution removes a whole silent-failure
         # class.
         run: |
-          if [ "${{ matrix.platform.triplet }}" = "x86_64-windows-ucrt" ]; then
-            export PATH="/d/a/_temp/msys64/ucrt64/bin:/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32"
+          if [ -n "$CONTAINER" ]; then
+            # The musl leg: every binary tools/build executes is
+            # musl-dynamic — the imager (mkimage/extract/stat/info), the
+            # wrapper exe (the wrapper smoke), the staged bun (the boot
+            # smoke) — and upstream's musl bun links libstdc++.so.6
+            # beyond libc.musl, so a musl userland is required, not just
+            # the loader. docker-run the leg's alpine container from the
+            # glibc host (the ruby/python factories' container grammar),
+            # the workspace bind-mounted at its host path so the pins'
+            # relative paths (TFS_CLI, WRAPPER_BIN, PRELOAD_SHIM) hold
+            # verbatim. apk provides the leg's tools: bash (tools/build),
+            # curl + ca-certificates (the fetches), libarchive-tools
+            # ($TAR = bsdtar — GNU tar cannot read the upstream zips),
+            # libstdc++ (bun's second DT_NEEDED).
+            docker run --rm \
+              -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+              -e TRIPLET -e ASSET_PLATFORM -e EXE_SUFFIX -e TAR -e TFS_CLI -e FLAVOR \
+              -e WRAPPER_BIN -e PRELOAD_SHIM -e GITHUB_REF_NAME \
+              -e TEBAKO_RELEASE_SIGNING_ENABLED -e TEBAKO_RELEASE_SIGNING_KEYID \
+              "$CONTAINER" sh -ec \
+              'apk --no-cache add bash curl ca-certificates libarchive-tools libstdc++ > /dev/null && exec bash tools/build'
+          else
+            if [ "${{ matrix.platform.triplet }}" = "x86_64-windows-ucrt" ]; then
+              export PATH="/d/a/_temp/msys64/ucrt64/bin:/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32"
+            fi
+            tools/build
           fi
-          tools/build
 
       - name: Upload payload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
