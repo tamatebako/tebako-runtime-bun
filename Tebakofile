@@ -25,12 +25,12 @@ flavors:
       # Bun 1.4.2 (oven-sh/bun GitHub releases) — one binary source per
       # platform (repack: no compilation). platform is the spec 03
       # triplet; the zips nest under one dir (strip_components: 1).
-      # Digests verified against the release's SHASUMS256.txt 2026-09-26.
-      # linux-musl is DEFERRED (issue #2): upstream ships musl builds
-      # (bun-linux-x64-musl-baseline.zip, bun-linux-aarch64-musl.zip —
-      # digests in the release's SHASUMS256.txt) and the tebako product
-      # ships the full musl toolchain at v2.8.22, so the legs land as
-      # declared recipe rows, never discovered at run time.
+      # Digests verified against the release's SHASUMS256.txt 2026-09-26
+      # (the two linux-musl rows 2026-10-07 — issue #2's legs, landed as
+      # declared recipe rows, never discovered at run time). The x64 musl
+      # row is the BASELINE build like its gnu sibling. Upstream's musl
+      # binary is musl-DYNAMIC (DT_NEEDED libc.musl + libstdc++.so.6), so
+      # the musl legs' smokes ride the alpine container (build-payload.yml).
       # Upstream signs the macOS/windows binaries (Oven); staging
       # verifies and records the verdict in the manifest's provenance.
       version: "1.4.2"
@@ -50,6 +50,14 @@ flavors:
         - platform: "aarch64-linux-gnu"
           url: "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-aarch64.zip"
           sha256: "54328bbc2d9c8e0c9f892c544d66c57a83b84139e34909e5ee81758f1ac8fda7"
+          strip_components: 1
+        - platform: "x86_64-linux-musl"
+          url: "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64-musl-baseline.zip"
+          sha256: "76e1db84e98f22f78de0a87e309bfbbf297732847f9720db36750646c85c8c18"
+          strip_components: 1
+        - platform: "aarch64-linux-musl"
+          url: "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-aarch64-musl.zip"
+          sha256: "71760b6c8ea30623b81a4907cb815d48e2ea266f2e73e751534a44a0607950df"
           strip_components: 1
         - platform: "x86_64-windows-ucrt"
           url: "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-windows-x64-baseline.zip"
@@ -91,17 +99,20 @@ runtime:
   # wrapper pattern, spec 32's executable requires edges, spec 33's
   # on_runtime composition, the mount-ancestor routes the flavors
   # mechanism mounts through, and the full linux-musl toolchain (the
-  # deferred musl legs' pins — issue #2).
+  # musl legs' pins — issue #2).
   wrapper_tebako: "2.8.22"
   # The wrapper's trust anchor, per tool-platform (the launcher is the
   # shipped runtime pair's process entry point — an unauthenticated
   # download would be a supply-chain hole). Digests are the v2.8.22
-  # release's monolith SHA256SUMS entries, fetched 2026-09-29.
+  # release's monolith SHA256SUMS entries, fetched 2026-09-29 (the
+  # linux-musl pair 2026-10-07).
   wrapper_sha256:
     macos-arm64: "6491565e8e75a8e2776a75d4f03875db8a978e94b1d244c43649b773015552c6"
     macos-x86_64: "d9e901cdba292344870c1834c0fe737a14125acc45273721b19cde03b0f772af"
     linux-gnu-x86_64: "5882c74710db287ac6e73c0d5c09afdfd696555da4ede5aad1c6b6e0b6235013"
     linux-gnu-arm64: "e27befc2dcc5f00390b6bdf67bd4cfda0adbca53fbc363902e4423a0b852c91f"
+    linux-musl-x86_64: "ead432a28233adf5b5df3625c7a49caa1178d1592aaacdb11c248cb33775fbc9"
+    linux-musl-arm64: "b3fe4b910b5c965276c0840f7bb7910c1f8cc238324d66fc8d4c8739718d1e48"
     windows-ucrt64: "afe65d91b046d829fbc9b7e9ae4de8cbc76290021274cb899b25dc2e6339bda3"
 
 # Factory tools used by tools/build (the imager + the preload shim): the
@@ -111,7 +122,8 @@ runtime:
 # tools/pins.rb reads this block into $GITHUB_ENV). The tfs pins are
 # cross-checked against the release's SHA256SUMS at fetch time; the
 # link-unit tarballs are NOT in that monolith, so these pins are their
-# single trust anchor (verified against the v2.8.22 downloads 2026-09-29).
+# single trust anchor (verified against the v2.8.22 downloads 2026-09-29;
+# the linux-musl pair 2026-10-07).
 tools:
   repo: "tamatebako/tebako"
   release: "v2.8.22"
@@ -132,12 +144,16 @@ tools:
       macos-x86_64: "78ada85085d54eb9094d58e2ca468a768433bd7a45dddebfe60345ccf859b9a4"
       linux-gnu-x86_64: "69c1db503c17a5a6f8dfba907e2dc0d4dc214e2d9761d865c4151d38e0a91527"
       linux-gnu-arm64: "917c117e4bd61d5b3c1c9d7f1c47919958c7d0f23171dc7b63036f2a4a16865d"
+      linux-musl-x86_64: "871862acbc917a0965cd7613451b4a3f190b829b4075b46cbdf18cd18c5d9de5"
+      linux-musl-arm64: "630ced3bc7eef45e88781037beab7522f2cdc6060001f6d033b35d5a7a9b5b82"
       windows-ucrt64: "6207b465156bc25c090320e0f8761d47dbafc4fe2b61e8141aaae826f311a816"
     link-unit:                       # POSIX legs only; the windows image omits preload_shim
       macos-arm64: "c11705ad8201acd021e9286f12a261223f537c8cfa055b634f6b0af9fe73decd"
       macos-x86_64: "674f8e39c4ac3e4997257147db960d197f79ba842e52712b7969e39d0d55d398"
       linux-gnu-x86_64: "b0b4f7cdd62e5bee26ef8d78b245ed5288e2ccd381f14aebee2016ee2b7892e0"
       linux-gnu-arm64: "9ab5bb77d314d56c51d721488c178f2d79e39fd6808df8ec5ab3aa786f2a6bf1"
+      linux-musl-x86_64: "e5a1f0061a33c3489b7eeadf3cacfd67adc9d0f2698a7e8aaaad0cf4d8fdf584"
+      linux-musl-arm64: "d6a9b8d00a5bbcaa0869f0ec441e53b36439a3cab4f1cb931652ce88533ddb0e"
 
 image:
   format: limnifs
