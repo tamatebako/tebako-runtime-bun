@@ -1,0 +1,71 @@
+# The bun release monitor (propose-bump shape) — the node factory's
+# daily monitor is the precedent, adapted to bun's upstream: oven-sh's
+# GitHub releases (no dist index), digests from each release's own
+# SHASUMS256.txt asset, and a MINOR-line pin (bun rolls weekly on 1.x;
+# the factory tracks one minor at a time — the monitor never crosses
+# it). Daily: tools/monitor rewrites Tebakofile's flavor sources when
+# a newer 1.4.x ships; this workflow turns the dirty tree into a PR.
+# Canary/prerelease tags are skipped; never merges (the bump PR rides
+# the lint gate and merges like every other PR).
+name: release-monitor
+
+on:
+  schedule:
+    # Off the :00/:30 herd; distinct from tamatebako/ruby's 17 6 and
+    # tebako-runtime-node's 41 6.
+    - cron: "53 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-monitor
+  cancel-in-progress: true
+
+jobs:
+  monitor:
+    name: propose the next bun pin
+    runs-on: ubuntu-latest
+    outputs:
+      verdict: ${{ steps.monitor.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: check upstream + rewrite the pin
+        id: monitor
+        run: |
+          set -euo pipefail
+          ruby tools/monitor | tee monitor-result.json
+          {
+            echo "verdict<<VERDICT_JSON_EOF"
+            cat monitor-result.json
+            echo "VERDICT_JSON_EOF"
+          } >> "$GITHUB_OUTPUT"
+          cat monitor-result.json >> "$GITHUB_STEP_SUMMARY"
+
+      # create-pull-request is a no-op on a clean tree — the "current"
+      # verdict commits nothing and this step simply succeeds. The
+      # add-paths guard keeps the commit to the recipe alone: never the
+      # runner's .bundle config (bundler-cache writes one), never the
+      # run's monitor-result.json.
+      - name: open the bump pull request
+        uses: peter-evans/create-pull-request@dd2324fc52d5d43c699a5636bcf19fceaa654c5e # v7.0.7
+        with:
+          branch: monitor/bun-pin
+          add-paths: Tebakofile
+          title: "bun ${{ fromJSON(steps.monitor.outputs.verdict).candidate }} (release monitor)"
+          commit-message: "bun ${{ fromJSON(steps.monitor.outputs.verdict).candidate }} (release monitor)"
+          body: |
+            Automated pin bump by the release monitor: bun **${{ fromJSON(steps.monitor.outputs.verdict).candidate }}** is the newest release on the pinned line (was ${{ fromJSON(steps.monitor.outputs.verdict).current }}).
+
+            - all flavor sources moved (the baseline x64 set included)
+            - digests re-pinned from the release's own SHASUMS256.txt asset
+            - no minor-line crossing, canary/prerelease tags skipped; no other `version:` key touched (the tools pins stay)
+
+            Merging runs the lint gate; the publish rides the factory's own release cadence (build-payload's dispatch).

@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# monitor — the release monitor's executable edge: run the propose-bump
+# check and print the verdict as JSON (the workflow's PR title/body and
+# the job summary read it). All logic lives in
+# Feedstock::ReleaseMonitor (tools/lib/feedstock.rb), specable without
+# a network.
+
+$LOAD_PATH.unshift(File.expand_path("lib", __dir__))
+require "feedstock"
+
+require "json"
+begin
+  puts JSON.generate(Feedstock::ReleaseMonitor.check_and_bump)
+rescue Feedstock::FeedstockError => e
+  warn JSON.generate(action: "error", message: e.message)
+  exit 1
+end
