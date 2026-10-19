@@ -25,6 +25,9 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+require "json"
+require "net/http"
+require "uri"
 require "yaml"
 
 # The feedstock's release-shape model (spec 00 §10 — SSOT flow, never a
@@ -168,5 +171,115 @@ module Feedstock
     raise FeedstockError,
           "NAMED FAILURE: #{matrix_path(env)} carries no jobs.build.strategy.matrix block — " \
           "the release tools read the leg set from it"
+  end
+  # The bun release monitor (propose-bump shape): checks oven-sh/bun's
+  # GitHub releases for a newer release on the pinned major.minor line
+  # and rewrites Tebakofile's flavor sources to it with fresh digests
+  # from the release's own SHASUMS256.txt asset. Never crosses the
+  # minor line (bun's line pin is an owner decision — it rolls weekly
+  # on 1.x and the factory tracks one minor at a time), skips canary
+  # and prerelease tags, never writes a partial file (every digest
+  # resolves before the first byte moves), and the version anchor is
+  # url-derived (`…/download/bun-v<ver>/…`), never a bare `version:`
+  # key — the Tebakofile's tools pins carry their own version: keys
+  # and must never be caught by a bump.
+  module ReleaseMonitor
+    BUN_RELEASES = "https://api.github.com/repos/oven-sh/bun/releases"
+
+    module_function
+
+    def check_and_bump(recipe_path = File.join(REPO_ROOT, RECIPE_BASENAME))
+      body = File.read(recipe_path)
+      current = current_version(body)
+      candidate = newest_on_line(current)
+      return { action: "current", current: current } if candidate.nil? || candidate == current
+
+      digests = parse_shasums(shasums_text(candidate))
+      updated, touched = rewrite(body, current, candidate, digests)
+      File.write(recipe_path, updated)
+      { action: "bump", current: current, candidate: candidate, sources: touched }
+    end
+
+    def current_version(body)
+      body[%r{releases/download/bun-v(\d+\.\d+\.\d+)/}, 1] ||
+        raise(FeedstockError, "NAMED FAILURE: no bun-v<version>/ download url in Tebakofile — the url anchor is gone")
+    end
+
+    def parse_shasums(text)
+      text.each_line.each_with_object({}) do |line, map|
+        digest, name = line.split
+        map[name] = digest if digest && name
+      end
+    end
+
+    def rewrite(body, current, candidate, digests)
+      pending = nil
+      touched = 0
+      lines = body.each_line.map do |line|
+        if line.include?("oven-sh/bun") && line.include?("bun-v#{current}/")
+          pending = line[%r{/([^/"]+)"\s*\z}, 1]
+          touched += 1
+          next line.gsub("bun-v#{current}", "bun-v#{candidate}")
+        end
+        if pending && (digest_line = line.match(/^\s*sha256: "([0-9a-f]{64})"/))
+          digest = digests.fetch(pending) do
+            raise FeedstockError,
+                  "NAMED FAILURE: bun-v#{candidate} carries no SHASUMS256.txt entry for #{pending} — upstream layout changed"
+          end
+          pending = nil
+          next line.sub(digest_line[1], digest)
+        end
+        line
+      end
+      joined = lines.join
+      joined = joined.sub("version: \"#{current}\"", "version: \"#{candidate}\"")
+      [joined, touched]
+    end
+
+    # --- the network edge (kept last: everything above is specable) ---
+
+    def newest_on_line(current)
+      prefix = current.split(".")[0, 2].join(".")
+      http_get_json("#{BUN_RELEASES}?per_page=30").each do |release|
+        next if release["prerelease"] || release["draft"]
+
+        tag = release["tag_name"].to_s
+        next unless tag == "bun-v#{current}" || tag.match?(/\Abun-v#{Regexp.escape(prefix)}\.\d+\z/)
+
+        version = tag.sub(/\Abun-v/, "")
+        return nil if version == current
+
+        return version
+      end
+      nil
+    end
+
+    def shasums_text(version)
+      # The /releases/download/ browser URL serves the bytes directly
+      # (a plain GET, redirect included); the API-json Accept belongs to
+      # http_get_json only — sending it here would answer 415.
+      http_get("https://github.com/oven-sh/bun/releases/download/bun-v#{version}/SHASUMS256.txt",
+               accept: nil)
+    end
+
+    def http_get(url, accept: "application/vnd.github+json", redirects: 3)
+      uri = URI.parse(url)
+      response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
+        request = Net::HTTP::Get.new(uri.request_uri)
+        request["Accept"] = accept if accept
+        http.request(request)
+      end
+      return http_get(response["location"], accept: nil, redirects: redirects - 1) if response.is_a?(Net::HTTPRedirection) && redirects.positive?
+
+      unless response.is_a?(Net::HTTPSuccess)
+        raise FeedstockError, "NAMED FAILURE: GET #{url} answered #{response.code} — the monitor never guesses past a dead upstream"
+      end
+
+      response.body
+    end
+
+    def http_get_json(url)
+      JSON.parse(http_get(url))
+    end
   end
 end
