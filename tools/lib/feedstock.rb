@@ -215,8 +215,15 @@ module Feedstock
     def rewrite(body, current, candidate, digests)
       pending = nil
       touched = 0
+      # The url-line match is the FULL authored grammar (url-key +
+      # https + the one upstream host), anchored — never a substring
+      # scan of a url-bearing line: a comment mentioning oven-sh/bun
+      # must never arm a rewrite (CodeQL's
+      # rb/incomplete-url-substring-sanitization fired on the include?
+      # form in the node twin; same code, same fix).
+      source_url = %r{^\s*url:\s*"https://github\.com/oven-sh/bun/releases/download/}
       lines = body.each_line.map do |line|
-        if line.include?("oven-sh/bun") && line.include?("bun-v#{current}/")
+        if line =~ source_url && line.include?("bun-v#{current}/")
           pending = line[%r{/([^/"]+)"\s*\z}, 1]
           touched += 1
           next line.gsub("bun-v#{current}", "bun-v#{candidate}")
@@ -269,8 +276,14 @@ module Feedstock
         request["Accept"] = accept if accept
         http.request(request)
       end
-      return http_get(response["location"], accept: nil, redirects: redirects - 1) if response.is_a?(Net::HTTPRedirection) && redirects.positive?
+      if response.is_a?(Net::HTTPRedirection) && redirects.positive?
+        location = URI.parse(response["location"])
+        unless location.is_a?(URI::HTTPS)
+          raise FeedstockError, "NAMED FAILURE: redirect to '#{response['location']}' — only https is followed"
+        end
 
+        return http_get(location.to_s, accept: nil, redirects: redirects - 1)
+      end
       unless response.is_a?(Net::HTTPSuccess)
         raise FeedstockError, "NAMED FAILURE: GET #{url} answered #{response.code} — the monitor never guesses past a dead upstream"
       end
