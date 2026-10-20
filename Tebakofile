@@ -107,13 +107,13 @@ runtime:
   # release's monolith SHA256SUMS entries, fetched 2026-09-29 (the
   # linux-musl pair 2026-10-07).
   wrapper_sha256:
-    macos-arm64: "6491565e8e75a8e2776a75d4f03875db8a978e94b1d244c43649b773015552c6"
-    macos-x86_64: "d9e901cdba292344870c1834c0fe737a14125acc45273721b19cde03b0f772af"
-    linux-gnu-x86_64: "5882c74710db287ac6e73c0d5c09afdfd696555da4ede5aad1c6b6e0b6235013"
-    linux-gnu-arm64: "e27befc2dcc5f00390b6bdf67bd4cfda0adbca53fbc363902e4423a0b852c91f"
-    linux-musl-x86_64: "ead432a28233adf5b5df3625c7a49caa1178d1592aaacdb11c248cb33775fbc9"
-    linux-musl-arm64: "b3fe4b910b5c965276c0840f7bb7910c1f8cc238324d66fc8d4c8739718d1e48"
-    windows-ucrt64: "afe65d91b046d829fbc9b7e9ae4de8cbc76290021274cb899b25dc2e6339bda3"
+    macos-arm64: "eeee3f7bff1f7b8bd3b17e624ab5856c4fb5d8edb446f79ab962b44bd5651704"
+    macos-x86_64: "53f192aa656d34f09affcae4b01ae0a35d88137c4e21e049c8951db435c65f94"
+    linux-gnu-x86_64: "7829d1a1f221aeca7bd79be40ebf3999563cbcff436f961b40bc08772ff06d1b"
+    linux-gnu-arm64: "6083e904f26feb3c3082ecdafa34e48c483772a44ddf98db06571fd2a0a0878c"
+    linux-musl-x86_64: "eca258757ae3a3d1b88a8e9163978e43b58686c08ddcdc13434523efbacc7cae"
+    linux-musl-arm64: "ca8fedb94cf6ec30cb001a7ace1c0437932cec858021afa3ad290784780609fd"
+    windows-ucrt64: "4b65e5ae8da9035ece328a7ec308c5f6d567782aa69740169e2c735b071777a1"
 
 # Factory tools used by tools/build (the imager + the preload shim): the
 # tfs CLI and the link-unit tarball from the tamatebako/tebako release.
@@ -126,7 +126,7 @@ runtime:
 # the linux-musl pair 2026-10-07).
 tools:
   repo: "tamatebako/tebako"
-  release: "v2.8.22"
+  release: "v2.8.47"
   # The release machinery pin: the tamatebako/tebako-release-tooling tag
   # the Gemfile resolves (the sign step's tebako-release exe). The gem is
   # the signer's single owner (ecosystem invariant 10) — this feedstock
@@ -140,20 +140,20 @@ tools:
   release_tooling: "v0.5.1"
   sha256:
     tfs:
-      macos-arm64: "08f201f20e808dc0d4253e1617a3dc549a1a316132fdce9d81457645049d2eda"
-      macos-x86_64: "78ada85085d54eb9094d58e2ca468a768433bd7a45dddebfe60345ccf859b9a4"
-      linux-gnu-x86_64: "69c1db503c17a5a6f8dfba907e2dc0d4dc214e2d9761d865c4151d38e0a91527"
-      linux-gnu-arm64: "917c117e4bd61d5b3c1c9d7f1c47919958c7d0f23171dc7b63036f2a4a16865d"
-      linux-musl-x86_64: "871862acbc917a0965cd7613451b4a3f190b829b4075b46cbdf18cd18c5d9de5"
-      linux-musl-arm64: "630ced3bc7eef45e88781037beab7522f2cdc6060001f6d033b35d5a7a9b5b82"
-      windows-ucrt64: "6207b465156bc25c090320e0f8761d47dbafc4fe2b61e8141aaae826f311a816"
+      macos-arm64: "ac5237214f610f89089684aa0041fdbd43fa929c237a0d716e9fa1dc5bcfa0fe"
+      macos-x86_64: "1d2b625c67c1d8af48e376f9aae4ecee5f991fa788f0ff88830cc0d2e3eb1169"
+      linux-gnu-x86_64: "f1ea8235e713d4335c7666c2c337de8cdf6790810f3820d34ad206d39c383977"
+      linux-gnu-arm64: "f4f2aa622a8322114a464f15c54e02b558d1cc8e5563154bcec608e2408fb29d"
+      linux-musl-x86_64: "83941507c2d1b3558682b77b4cb284d940257ce43c84cc6aa4813c6769ac7497"
+      linux-musl-arm64: "9da779ea0699f8ae27752416edb67f9856ba643079933ed80a53950733f0db28"
+      windows-ucrt64: "96bf0560079faeacdf6bef4eee323810e688c329b0705fa68a21c81d22988e89"
     link-unit:                       # POSIX legs only; the windows image omits preload_shim
-      macos-arm64: "c11705ad8201acd021e9286f12a261223f537c8cfa055b634f6b0af9fe73decd"
-      macos-x86_64: "674f8e39c4ac3e4997257147db960d197f79ba842e52712b7969e39d0d55d398"
-      linux-gnu-x86_64: "b0b4f7cdd62e5bee26ef8d78b245ed5288e2ccd381f14aebee2016ee2b7892e0"
-      linux-gnu-arm64: "9ab5bb77d314d56c51d721488c178f2d79e39fd6808df8ec5ab3aa786f2a6bf1"
-      linux-musl-x86_64: "e5a1f0061a33c3489b7eeadf3cacfd67adc9d0f2698a7e8aaaad0cf4d8fdf584"
-      linux-musl-arm64: "d6a9b8d00a5bbcaa0869f0ec441e53b36439a3cab4f1cb931652ce88533ddb0e"
+      macos-arm64: "37f0546157e2fc9578afd812398c3a32e84b046351bd1c96419a322e890ec5cc"
+      macos-x86_64: "679b33a98f9d903b9bf187e7bd0e174754f70bc6df6204b23ddaac6c57f483a6"
+      linux-gnu-x86_64: "4386fa6780c83b6225a6b41141cb5dd83edad85b1da08807f8a7a88643fb4e9d"
+      linux-gnu-arm64: "6a9c002c3c6719217e98b121bd9ee4ff5b75bcf3a513030b8c8e9395b39fa9ae"
+      linux-musl-x86_64: "0b8ebba73ed0b66f69e637e4683c1e2df006eef4176a4c4e8cdf5470c5d22d98"
+      linux-musl-arm64: "2282700dfa4691d072b51ef8df35ab4b737950a89f5d87ab656ceafb7e72cda4"
 
 image:
   format: limnifs
