@@ -201,6 +201,18 @@ jobs:
           path-type: minimal
           install: mingw-w64-ucrt-x86_64-libarchive mingw-w64-ucrt-x86_64-gcc-libs
 
+      # The musl legs run on glibc ubuntu hosts (there is no musl
+      # runner): the legs' build+smoke run inside the alpine container,
+      # but the IN-LEG sign step runs on the host — and the sign tool
+      # (the release's tebako-pkg for the leg's platform) is musl-DYNAMIC
+      # (ELF interp /lib/ld-musl-<arch>.so.1), so the host spawn ENOENTs
+      # without the loader (the v2.8.47 publish's musl legs failed
+      # exactly so). The `musl` package ships exactly that loader and
+      # nothing else is needed — the node factory's proven shape.
+      - name: Install the musl dynamic loader
+        if: contains(matrix.platform.triplet, 'linux-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl
+
       # Tebakofile's tools block is the toolchain pin SSOT; pins.rb emits
       # TEBAKO_RELEASE, PKG_NAME/PKG_VERSION, the per-platform
       # TFS_ASSET/TFS_SHA256 + LINK_UNIT_ASSET/LINK_UNIT_SHA256 for THIS
