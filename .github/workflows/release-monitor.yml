@@ -56,7 +56,15 @@ jobs:
       # run's monitor-result.json.
       - name: open the bump pull request
         uses: peter-evans/create-pull-request@v7
+        # A GITHUB_TOKEN-authored PR never triggers on:pull_request
+        # workflows (GitHub's anti-recursion rule) — the lint gate's
+        # required context then never reports and the PR blocks forever
+        # (the 1.4.3 bump needed an admin merge for exactly this; same
+        # fix as tebako-runtime-node#12). The suite registry PRs'
+        # established pattern: author with the org PAT so CI runs like
+        # on any human PR.
         with:
+          token: ${{ secrets.TEBAKO_CI_PAT_TOKEN }}
           branch: monitor/bun-pin
           add-paths: Tebakofile
           title: "bun ${{ fromJSON(steps.monitor.outputs.verdict).candidate }} (release monitor)"
