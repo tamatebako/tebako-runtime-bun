@@ -548,6 +548,17 @@ jobs:
             tools/build
           fi
 
+      # The container builds as root; the bind-mounted out/ + .packager/
+      # land root-owned on the host, and the in-leg sign step (the host
+      # ruby) writes each .asc BESIDE the artifact — root-owned trees
+      # refuse that (v2.8.47's musl legs died at the sign on exactly
+      # this: Permission denied, os error 13). Hand the tree back after
+      # the container exits — chown on the host, never inside the
+      # container (the container's ownership never crosses the bind).
+      - name: Hand the container's outputs back to the host user
+        if: contains(matrix.platform.triplet, 'linux-musl')
+        run: sudo chown -R "$USER:$USER" out .packager
+
       - name: Upload payload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
