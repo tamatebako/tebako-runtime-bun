@@ -55,7 +55,7 @@ jobs:
       # runner's .bundle config (bundler-cache writes one), never the
       # run's monitor-result.json.
       - name: open the bump pull request
-        uses: peter-evans/create-pull-request@dd2324fc52d5d43c699a5636bcf19fceaa654c5e # v7.0.7
+        uses: peter-evans/create-pull-request@v7
         with:
           branch: monitor/bun-pin
           add-paths: Tebakofile
