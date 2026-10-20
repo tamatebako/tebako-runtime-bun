@@ -100,7 +100,7 @@ runtime:
   # on_runtime composition, the mount-ancestor routes the flavors
   # mechanism mounts through, and the full linux-musl toolchain (the
   # musl legs' pins — issue #2).
-  wrapper_tebako: "2.8.22"
+  wrapper_tebako: "2.8.47"
   # The wrapper's trust anchor, per tool-platform (the launcher is the
   # shipped runtime pair's process entry point — an unauthenticated
   # download would be a supply-chain hole). Digests are the v2.8.22
