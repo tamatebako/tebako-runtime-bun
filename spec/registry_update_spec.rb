@@ -78,7 +78,7 @@ RSpec.describe RegistryUpdate do
   let(:version) { "9.9.9" }
 
   # The build-matrix fixture the feedstock model reads the asset-platform
-  # → triplet mapping from (the real workflow's shape: 1 flavor × 7
+  # → triplet mapping from (the real workflow's shape: 1 flavor × 8
   # platforms).
   MATRIX_FIXTURE = <<~YAML
     name: build-payload
@@ -95,6 +95,7 @@ RSpec.describe RegistryUpdate do
               - {triplet: x86_64-linux-musl, asset_platform: linux-musl-x86_64, exe_suffix: ""}
               - {triplet: aarch64-linux-musl, asset_platform: linux-musl-arm64, exe_suffix: ""}
               - {triplet: x86_64-windows-ucrt, asset_platform: windows-ucrt64, exe_suffix: .exe}
+              - {triplet: aarch64-windows-ucrt, asset_platform: windows-ucrt-arm64, exe_suffix: .exe}
   YAML
 
   # A release shard as tools/build writes it (the release's

@@ -60,12 +60,12 @@ wrong-line resolution is a named error, never a segfault.
 > wire directly (`--tebako-entry bun …` on the wrapper exe).
 
 Platform coverage follows the tebako launcher's: macOS (arm64, x86_64),
-linux (gnu + musl, x86_64 + arm64), windows (x86_64). The aarch64-windows leg
-lands when the product ships `tebako-runtime-launcher` for
-windows-ucrt-arm64 — upstream's windows-arm64 build is native since
-v1.3.10, so only the wrapper is missing. Note for that leg when it
-arrives: `bun:ffi` is disabled on windows-arm64 upstream, so payloads
-needing ffi exclude the triplet.
+linux (gnu + musl, x86_64 + arm64), windows (x86_64 + arm64). The
+aarch64-windows leg rides GitHub's `windows-11-arm` runner and the
+product's `windows-ucrt-arm64` launcher (shipped since tebako v2.8.46);
+upstream's windows-arm64 build is native since v1.3.10. One upstream
+caveat on that triplet: `bun:ffi` is disabled on windows-arm64
+(oven-sh/bun#28055), so payloads needing ffi exclude it.
 
 ## Release shape
 
