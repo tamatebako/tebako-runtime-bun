@@ -228,20 +228,28 @@ jobs:
           path-type: minimal
           install: mingw-w64-ucrt-x86_64-libarchive mingw-w64-ucrt-x86_64-gcc-libs
 
-      # Same single need on the arm64 leg (a zip-capable tar), from the
-      # runner's NATIVE msys2 environment: windows-11-arm's environment is
-      # clangarm64 (the product repo's windows-arm64-ship leg + the ruby
-      # factory's arm64 leg run it; an x64 ucrt64 stack would be emulation
-      # for zero gain — this leg compiles nothing). clangarm64 is pure
-      # LLVM, so no gcc-libs ride-along; pacman resolves libarchive's own
-      # closure.
-      - name: Set up MSys2 (clangarm64 bsdtar)
+      # The arm64 leg's msys2 needs, from the runner's NATIVE environment:
+      # windows-11-arm's environment is clangarm64 (the product repo's
+      # windows-arm64-ship leg + the ruby factory's arm64 leg run it; an
+      # x64 ucrt64 stack would be emulation for zero gain). bsdtar reads
+      # the recipe's windows zip (GNU tar cannot). The C toolchain is the
+      # tag-gated bundle step's need: the runner's hosted Ruby IS MSYS2's
+      # clangarm64 ruby build (rbconfig: CC=clang, --prefix=/clangarm64)
+      # and json publishes ruby/java-platform gems only — no precompiled
+      # mingw gem at any version — so the bundle compiles json's C
+      # extension in-leg (the v2.8.49 publish's arm64 leg died there: no
+      # compiler on PATH). `gcc` is clangarm64's VIRTUAL package (→
+      # gcc-compat → clang; clangarm64 is pure LLVM, so still no gcc-libs
+      # ride-along) and `make` is the MSYS package (/usr/bin/make.exe —
+      # the hosted rbconfig records no MAKE, so rubygems' builder invokes
+      # plain `make`; clangarm64/bin carries only mingw32-make).
+      - name: Set up MSys2 (clangarm64 bsdtar + C toolchain)
         if: matrix.platform.triplet == 'aarch64-windows-ucrt'
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
         with:
           msystem: clangarm64
           path-type: minimal
-          install: mingw-w64-clang-aarch64-libarchive
+          install: mingw-w64-clang-aarch64-libarchive mingw-w64-clang-aarch64-gcc make
 
       # The musl legs run on glibc ubuntu hosts (there is no musl
       # runner): the legs' build+smoke run inside the alpine container,
@@ -634,11 +642,21 @@ jobs:
       # image's hosted Ruby (3.4.x, native arm64 — the Gemfile already
       # declares base64 for 3.4+ hosts); no bundler-cache helper exists
       # without setup-ruby, so bundle install runs plainly. Tag runs only,
-      # like the setup-ruby step it replaces.
+      # like the setup-ruby step it replaces. The bundle COMPILES json's C
+      # extension here (no precompiled mingw gem exists), so the leg's
+      # msys2 clangarm64 toolchain + the MSYS make go on PATH first —
+      # setup-msys2 exposes only its own wrapper dir to later steps, and
+      # the msys2 root derives from $RUNNER_TEMP (the build step's re-root
+      # pattern: the literal /d/a/... shape does not exist on
+      # windows-11-arm). clangarm64 ahead of usr/bin so the mkmf probes
+      # never meet a non-aarch64 tool.
       - name: Bundle the release tooling (windows-arm64's hosted Ruby)
         if: startsWith(github.ref, 'refs/tags/') && matrix.platform.triplet == 'aarch64-windows-ucrt'
         shell: bash
-        run: bundle install --jobs 4
+        run: |
+          msys2="$(cygpath "$RUNNER_TEMP")/msys64"
+          export PATH="$msys2/clangarm64/bin:$msys2/usr/bin:$PATH"
+          bundle install --jobs 4
 
       # Spec 13 §2a (the de-rendezvous): the leg that built a
       # pair publishes it — the write-once names THIS leg owns alone (the
