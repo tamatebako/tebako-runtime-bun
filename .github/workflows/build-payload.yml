@@ -627,6 +627,19 @@ jobs:
         shell: bash
         run: bundle install --jobs 4
 
+      # TEMPORARY PR REHEARSAL (drop before merge): the tag-only bundle
+      # step above never runs on a PR, so its one real risk — the locked
+      # json gem's C extension compiling on the hosted ruby — is proven
+      # HERE instead, on every PR run of this branch.
+      - name: REHEARSAL — the arm64 leg's hosted-Ruby bundle path
+        if: matrix.platform.triplet == 'aarch64-windows-ucrt'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ruby --version
+          bundle install --jobs 4
+          bundle exec ruby -e 'require "tebako_release"; puts "tebako-release closure loads"'
+
       # Spec 13 §2a (the de-rendezvous): the leg that built a
       # pair publishes it — the write-once names THIS leg owns alone (the
       # wrapper exe, the .tfs env image, both .sha256 sidecars, the
