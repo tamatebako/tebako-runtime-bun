@@ -122,6 +122,34 @@ payloads:
         sha256: c35215414b793f7f8db1cf37a6d11ed13cf90374885684daf40f975fd28ad99b
     release:
       ref: tfs:github:tamatebako/tebako-runtime-bun:v2.8.55
+  - version: 1.4.4-2.8.57
+    platforms:
+      aarch64-linux-gnu:
+        artifact: tebako-runtime-2.8.57-bun-1.4.4-linux-gnu-arm64.tfs
+        sha256: 9e3afaafbc4b33202e1edb6f9b8f09632320f39de657b9b3ce3e3f7bf2c0c9bc
+      aarch64-linux-musl:
+        artifact: tebako-runtime-2.8.57-bun-1.4.4-linux-musl-arm64.tfs
+        sha256: af61ad12be7458cf7cb6730c3e7ff0868e79622911d5b7c540020b375a58d09c
+      aarch64-macos:
+        artifact: tebako-runtime-2.8.57-bun-1.4.4-macos-arm64.tfs
+        sha256: 427f5d7b741c2a2835e2f8979eec834e163dea6626089768e3d4899ff1571e9d
+      aarch64-windows-ucrt:
+        artifact: tebako-runtime-2.8.57-bun-1.4.4-windows-ucrt-arm64.tfs
+        sha256: 9c379a4f60aadfda8ce179a31af7bc0d6bf13cf399eb4caa573be5e6963042c8
+      x86_64-linux-gnu:
+        artifact: tebako-runtime-2.8.57-bun-1.4.4-linux-gnu-x86_64.tfs
+        sha256: 5f5c1b28a5cecb89772330e79d2ca5e2090ab33781348c2059066c7c6491bcd1
+      x86_64-linux-musl:
+        artifact: tebako-runtime-2.8.57-bun-1.4.4-linux-musl-x86_64.tfs
+        sha256: 0702f828ba834f57c28c34529b1899bb25e9e9deec7cddec68e5e07dea9e141a
+      x86_64-macos:
+        artifact: tebako-runtime-2.8.57-bun-1.4.4-macos-x86_64.tfs
+        sha256: f57ec7704f938b042c2410cf27505fe7d0a273bf21df312bee9de2b784bdc01a
+      x86_64-windows-ucrt:
+        artifact: tebako-runtime-2.8.57-bun-1.4.4-windows-ucrt64.tfs
+        sha256: e45bb530f83626ec114466eff9d6406248ee5cd2a0a041e829e705335bafa74e
+    release:
+      ref: tfs:github:tamatebako/tebako-runtime-bun:v2.8.57
   engine: bun
   implementation: bun
-  default: 1.4.3-2.8.55
+  default: 1.4.4-2.8.57
