@@ -70,7 +70,10 @@ RSpec.describe ReleaseAudit do
   def leg_names(implementation, bun_version, asset_platform, exe_suffix)
     stem = "tebako-runtime-#{version}-#{implementation}-#{bun_version}-#{asset_platform}"
     exe = "#{stem}#{exe_suffix}"
-    [exe, "#{exe}.sha256", "#{stem}.tfs", "#{stem}.tfs.sha256", "#{stem}.manifest.json"]
+    [exe, "#{exe}.sha256",
+     "#{stem}.tfs", "#{stem}.tfs.sha256",
+     "#{stem}.tfs.blksum.json", "#{stem}.tfs.blksum.json.sha256",
+     "#{stem}.manifest.json"]
   end
 
   # The whole expected matrix, written out: 1 flavor × 8 platforms ×
@@ -103,14 +106,14 @@ RSpec.describe ReleaseAudit do
   it "derives the expected matrix from the workflow matrix x recipe pins" do
     audit_for(all_names) do |audit|
       expect(audit.expected_names).to match_array(all_names)
-      expect(audit.expected_names.size).to eq(40)
+      expect(audit.expected_names.size).to eq(56)
     end
   end
 
   it "adds every served name's own .asc when the line signs (spec 09 §5's no-fold rule)" do
     audit_for(all_names, env_extra: { "TEBAKO_RELEASE_SIGNING_ENABLED" => "true" }) do |audit|
       expected = audit.expected_names(signing: true)
-      expect(expected.size).to eq(80)
+      expect(expected.size).to eq(112)
       expect(expected).to include("tebako-runtime-9.9.9-bun-1.4.2-macos-arm64.tfs.asc",
                                   "tebako-runtime-9.9.9-bun-1.4.2-windows-ucrt64.exe.asc")
     end

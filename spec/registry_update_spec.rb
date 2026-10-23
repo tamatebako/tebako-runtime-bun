@@ -154,6 +154,29 @@ RSpec.describe RegistryUpdate do
     doc["payloads"].find { |p| p["name"] == name }
   end
 
+  it "mirrors the shard's image.blksum pin into the platform row (spec 39 §3)" do
+    stem = "tebako-runtime-9.9.9-bun-1.4.4-macos-arm64"
+    blk_sha = Digest::SHA256.hexdigest("BYTES-#{stem}.tfs.blksum.json")
+    image = { "filename" => "#{stem}.tfs",
+              "sha256" => Digest::SHA256.hexdigest("BYTES-#{stem}.tfs"),
+              "blksum" => { "filename" => "#{stem}.tfs.blksum.json", "sha256" => blk_sha } }
+    doc = YAML.safe_load(render(shards_of({ bun: "1.4.4", platform: "macos-arm64", image: image })))
+
+    row = payload_named(doc, "bun")["versions"].first["platforms"]["aarch64-macos"]
+    expect(row["artifact"]).to eq("#{stem}.tfs")
+    expect(row["blksum"]).to eq("filename" => "#{stem}.tfs.blksum.json", "sha256" => blk_sha)
+  end
+
+  it "refuses a malformed image.blksum block by name (never a half-rendered pin)" do
+    stem = "tebako-runtime-9.9.9-bun-1.4.4-macos-arm64"
+    image = { "filename" => "#{stem}.tfs",
+              "sha256" => Digest::SHA256.hexdigest("BYTES-#{stem}.tfs"),
+              "blksum" => { "filename" => "#{stem}.tfs.blksum.json" } }
+
+    expect { render(shards_of({ bun: "1.4.4", platform: "macos-arm64", image: image })) }
+      .to raise_error(/image\.blksum must carry \{filename, sha256\}/)
+  end
+
   it "derives the registry from the shards: one bun payload, composite version lines, image-mirroring rows" do
     shards = shards_of({ bun: "1.4.2", platform: "macos-arm64" },
                        { bun: "1.9.0", platform: "macos-arm64" },
