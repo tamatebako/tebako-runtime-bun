@@ -276,11 +276,27 @@ module Feedstock
                accept: nil)
     end
 
-    def http_get(url, accept: "application/vnd.github+json", redirects: 3)
+    # The authenticated host. The token rides ONLY this host: the
+    # SHASUMS fetch and every redirect target are github.com objects,
+    # and a token sent there would be a credential leak for nothing.
+    TOKEN_HOST = "api.github.com"
+    # Attempts per GET, and the status classes that are a QUOTA answer
+    # rather than a dead upstream: 403 is the shared-IP anonymous limit
+    # (and the token-scope refusal), 429 the explicit throttling answer.
+    MAX_ATTEMPTS = 3
+
+    def transient_status?(code)
+      code == 403 || code == 429
+    end
+
+    def http_get(url, accept: "application/vnd.github+json", redirects: 3, attempt: 1)
       uri = URI.parse(url)
       response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
         request = Net::HTTP::Get.new(uri.request_uri)
         request["Accept"] = accept if accept
+        if uri.host == TOKEN_HOST && (token = ENV["GH_TOKEN"] || ENV["GITHUB_TOKEN"]) && !token.empty?
+          request["Authorization"] = "Bearer #{token}"
+        end
         http.request(request)
       end
       if response.is_a?(Net::HTTPRedirection) && redirects.positive?
@@ -289,13 +305,41 @@ module Feedstock
           raise FeedstockError, "NAMED FAILURE: redirect to '#{response['location']}' — only https is followed"
         end
 
-        return http_get(location.to_s, accept: nil, redirects: redirects - 1)
+        return http_get(location.to_s, accept: nil, redirects: redirects - 1, attempt: attempt)
       end
       unless response.is_a?(Net::HTTPSuccess)
-        raise FeedstockError, "NAMED FAILURE: GET #{url} answered #{response.code} — the monitor never guesses past a dead upstream"
+        code = response.code.to_i
+        if transient_status?(code) && attempt < MAX_ATTEMPTS
+          wait = retry_after(response) || attempt * 3
+          warn "release-monitor: GET #{url} answered #{code} (a quota answer, not a dead upstream) — " \
+               "retrying in #{wait}s (attempt #{attempt}/#{MAX_ATTEMPTS})"
+          sleep wait
+          return http_get(url, accept: accept, redirects: redirects, attempt: attempt + 1)
+        end
+        hint = if transient_status?(code)
+                 " — a quota answer survived #{MAX_ATTEMPTS} attempts; authenticate the call (GH_TOKEN) or retry later"
+               else
+                 ""
+               end
+        raise FeedstockError,
+              "NAMED FAILURE: GET #{url} answered #{response.code}#{hint} — the monitor never guesses past a dead upstream"
       end
 
       response.body
+    end
+
+    # The server's own advice when it gives one: `Retry-After` is seconds
+    # or an HTTP date; the rate-limit reset header is an epoch second.
+    def retry_after(response)
+      if (value = response["retry-after"]) && value.to_s.match?(/\A\d+\z/)
+        return [value.to_i, 60].min
+      end
+      if (reset = response["x-ratelimit-reset"]) && reset.to_s.match?(/\A\d+\z/)
+        delta = reset.to_i - Time.now.to_i
+        return [[delta, 1].max, 60].min
+      end
+
+      nil
     end
 
     def http_get_json(url)

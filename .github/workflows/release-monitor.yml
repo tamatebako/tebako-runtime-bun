@@ -39,6 +39,13 @@ jobs:
 
       - name: check upstream + rewrite the pin
         id: monitor
+        # GH_TOKEN authenticates the monitor's upstream index call: an
+        # anonymous api.github.com request shares the runner IP's quota
+        # and answers 403 under load (the 2026-10-23 run), which the
+        # monitor can no longer mistake for a dead upstream — it retries
+        # the quota answers and names them when they survive.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           ruby tools/monitor | tee monitor-result.json
