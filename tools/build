@@ -255,16 +255,20 @@ fi
 [ -x "$ROOT$INTERPRETER" ] || { echo "no interpreter at $ROOT$INTERPRETER in the staged tree"; exit 1; }
 
 # The bunx alias (the recipe's second entrypoint): upstream ships ONE
-# binary; bunx is the same bytes under the package-runner name (argv0
-# selects `bun x`). The alias mechanism is the image grammar's own — a
-# hard link, falling back to a copy where the filesystem refuses one
-# (never a symlink: the tree is dereferenced below either way).
+# binary on POSIX (its darwin tarball carries the link), and bunx is the
+# same bytes under the package-runner name. A LINK is what makes the pair
+# correct, not a copy: the driver's direct form is identity-based, so a
+# link resolves to the interpreter and the kernel execs it, while a copy is
+# a second native binary the interpreter then SPAWNS — and a spawn from a
+# child process cannot materialize out of the image (tebako#935: bun's six
+# legs answered `ENOENT: /__tfs__/bin/bunx`). The deref step below
+# therefore keeps the entrypoint aliases.
 step "stage the entrypoint aliases (the image grammar's own mechanism)"
 for ep in $ENTRYPOINTS; do
   p="$ROOT$EP_PREFIX/$ep$EXE_SUFFIX"
   [ -f "$p" ] && continue
   echo "alias: $EP_PREFIX/$ep$EXE_SUFFIX → $INTERPRETER"
-  ln "$ROOT$INTERPRETER" "$p" 2>/dev/null || cp "$ROOT$INTERPRETER" "$p"
+  ln -s "$(basename "$INTERPRETER")" "$p"
 done
 for ep in $ENTRYPOINTS; do
   [ -f "$ROOT$EP_PREFIX/$ep$EXE_SUFFIX" ] || {
@@ -296,9 +300,29 @@ resolve_link() {
   [ -f "$p" ] || return 1
   printf '%s' "$p"
 }
+# The entrypoint aliases stay LINKS: identity is what the driver's direct
+# form reads (a link to the interpreter means "the kernel execs the
+# interpreter", spec 29 §1), and dereferencing them would hand the
+# interpreter a second native binary to spawn out of the image — the
+# tebako#935 failure. Everything else in the tree keeps the
+# one-shape-on-every-platform rule.
+alias_links=""
+for ep in $ENTRYPOINTS; do
+  p="$ROOT$EP_PREFIX/$ep$EXE_SUFFIX"
+  if [ -L "$p" ]; then
+    target="$(resolve_link "$p")" || { echo "entrypoint alias $EP_PREFIX/$ep$EXE_SUFFIX dangles or escapes"; exit 1; }
+    case "$target" in
+      "$ROOT"/*) alias_links="$alias_links $p" ;;
+      *) echo "entrypoint alias $EP_PREFIX/$ep$EXE_SUFFIX resolves outside the payload tree: $target"; exit 1 ;;
+    esac
+  fi
+done
 deref_count=0
 while IFS= read -r link; do
   rel="${link#"$ROOT"/}"
+  case " $alias_links " in
+    *" $link "*) echo "kept: $rel (entrypoint alias — the driver's identity form reads it)"; continue ;;
+  esac
   if resolved="$(resolve_link "$link")"; then
     case "$resolved" in
       "$ROOT"/*) : ;;
