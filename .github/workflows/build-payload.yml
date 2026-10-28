@@ -818,6 +818,24 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The fleet identity (tebako-release#3): installation tokens of the
+      # tebako-fleet App — own rate budget, and app-pushed branches fire
+      # pull_request CI (a GITHUB_TOKEN never does). The registry-org
+      # token is minted for the tebako-packages installation because the
+      # aggregate nudge dispatches into tebako-packages/registry.
+      - name: Mint the fleet token
+        id: fleet
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.TEBAKO_CI_APP_ID }}
+          private-key: ${{ secrets.TEBAKO_CI_APP_PRIVATE_KEY }}
+      - name: Mint the registry-org token
+        id: fleet_registry
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.TEBAKO_CI_APP_ID }}
+          private-key: ${{ secrets.TEBAKO_CI_APP_PRIVATE_KEY }}
+          owner: tebako-packages
       - name: Guard — the tag IS the tebako product line
         # The composed-name fetch path ({base}/v<line>/<asset>, spec 13
         # §2a) resolves release AND asset stem from the one pin, so a tag
@@ -859,14 +877,15 @@ jobs:
       # The registry lands by bot PR, never a direct push to main (the
       # sibling factories' main branches are protected; this repo keeps
       # the same flow so a protection flip is a no-op). The PR rides the
-      # CI PAT: a GITHUB_TOKEN-authored PR triggers NO workflow runs
-      # (tamatebako/tebako#686), and a protected main would hold such a
-      # PR open forever — the PAT's PR runs lint + the registry-only
-      # fast path (the `changes` job above) and auto-merges when green.
+      # fleet App's token (tamatebako/tebako#686, tebako-release#3): a
+      # GITHUB_TOKEN-authored PR triggers NO workflow runs, and a
+      # protected main would hold such a PR open forever — the App's PR
+      # runs lint + the registry-only fast path (the `changes` job above)
+      # and auto-merges when green.
       # Idempotent across re-runs of the same tag.
       - name: Publish the registry entry via pull request
         env:
-          GH_TOKEN: ${{ secrets.TEBAKO_CI_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.fleet.outputs.token }}
         run: |
           set -euo pipefail
           cp tpkg-registry.yaml "$RUNNER_TEMP/registry.yaml"
@@ -923,11 +942,11 @@ jobs:
       # self-healing half when the wait runs out.
       - name: Nudge the official registry's aggregate
         env:
-          GH_TOKEN: ${{ secrets.TEBAKO_CI_PAT_TOKEN }}
+          GH_TOKEN: ${{ steps.fleet_registry.outputs.token }}
         run: |
           set -uo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::warning::TEBAKO_CI_PAT_TOKEN is unset — the aggregate picks this publish up on its six-hourly tick"
+            echo "::warning::the fleet token is unset — the aggregate picks this publish up on its six-hourly tick"
             exit 0
           fi
           branch="publish/${{ github.ref_name }}-registry"
