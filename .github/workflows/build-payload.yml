@@ -29,20 +29,19 @@ name: build-payload
 # used: the CLI refuses kind: runtime (runtimes publish through the
 # runtime release flow).
 #
-# TRUST PLANE (both passes gate-off byte-identical — spec 00 invariant
-# 7): the x86_64 windows leg Authenticode-signs the fetched wrapper exe
-# IN-LEG before tools/build pairs+hashes it (spec 34 §8.2 — sign-then-hash
+# TRUST PLANE (every pass gate-off byte-identical — spec 00 invariant
+# 7): the windows legs Authenticode-sign the fetched wrapper exe IN-LEG
+# before tools/build pairs+hashes it (spec 34 §8.2 — sign-then-hash
 # by construction, never a re-hash), the macos legs Developer-ID-sign +
 # notarize it the same way (spec 31 §5/§8.4 — the tools/runtime.entitlements
 # pair, gated on the APPLE_SIGNING_ENABLED repo variable), and on
 # signing-enabled lines each leg OpenPGP-signs its own served names
 # right after publishing them
 # (spec 09 §5, the tebako-release gem's signer — Tebakofile's
-# tools.release_tooling pins it). The aarch64 windows leg's wrapper ships
-# Authenticode-UNSIGNED for now — the product's own windows-ucrt-arm64
-# binaries ship unsigned the same way (its release.yml: the ecosystem's
-# arm64 Azure-signing story lands with the product's phase 3), and the
-# sign block below stays x64-only until then.
+# tools.release_tooling pins it). BOTH windows legs sign (tebako#1105 —
+# the product's phase-3 arm64 lane: the AZURE_* org secrets cover this
+# repo, and the node + ruby factories already run this exact block green
+# on windows-11-arm).
 #
 # PIN DISCIPLINE (the owner's rule): this workflow carries NO version or
 # digest literals. Tebakofile is the SSOT — the `tools:` block pins the
@@ -372,11 +371,10 @@ jobs:
       # tamatebako/tebako PR #566+#570): when the repo variable
       # WINDOWS_SIGNING_ENABLED=true, the fetched wrapper exe is Azure
       # Trusted Signed here — after its pin-verified download, BEFORE
-      # tools/build pairs it into out/. X64 ONLY by deliberate posture:
-      # the aarch64 leg's wrapper passes through unsigned (the product
-      # ships its own windows-ucrt-arm64 binaries Authenticode-unsigned;
-      # the arm64 signing story is the product's phase 3 — when it lands,
-      # this block's condition widens to both windows legs). Signing rides
+      # tools/build pairs it into out/. BOTH windows legs sign
+      # (tebako#1105 — the product's phase-3 arm64 lane; the node + ruby
+      # factories' aarch64 legs already run this exact block green on
+      # windows-11-arm). Signing rides
       # a sign-staging/ COPY, never the contract path directly (the
       # trr#157 shape): the action enumerates by EXTENSION, so the staging
       # step copies every PE under sign-staging/ with a PE extension, the
@@ -391,7 +389,7 @@ jobs:
       # step below skips and the leg ships unsigned, byte-identically to
       # today (spec 00 invariant 7 — §7.4 gate-off parity).
       - name: Arm check — Windows signing (spec 34 §4)
-        if: matrix.platform.triplet == 'x86_64-windows-ucrt'
+        if: contains(matrix.platform.triplet, 'windows')
         id: signgate
         shell: bash
         env:
